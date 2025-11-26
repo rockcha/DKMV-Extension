@@ -1,14 +1,106 @@
+// src/extension.ts
 import * as vscode from "vscode";
+
+// 🔗 서버 엔드포인트 분리
+// - AUTH_API_BASE: 인증/유저 정보 (FastAPI 8000)
+// - REVIEW_API_BASE: 리뷰/LLM (8002)
+const AUTH_API_BASE = "http://18.205.229.159:8000";
+const REVIEW_API_BASE = "http://18.205.229.159:8002";
+
+// ✅ 새 리뷰 생성 & 조회 엔드포인트 (LLM 서버)
+const REVIEW_REQUEST_URL = `${REVIEW_API_BASE}/v1/reviews/request`;
+const REVIEW_GET_URL = `${REVIEW_API_BASE}/v1/reviews`;
+
+// 🌐 웹 대시보드 주소 (토큰 발급 페이지 열 때 사용)
+const FRONTEND_URL = "https://web-dkmv.vercel.app";
+
+// 🔐 익스텐션 내부에서만 관리하는 인증 상태
+let authToken: string | null = null;
+let authUser: AuthUser | null = null;
 
 let panel: vscode.WebviewPanel | undefined;
 
-// 🔗 LLM 팀에서 제공한 단일 엔드포인트 (8001 포트)
-const API_BASE = "http://18.205.229.159:8001";
-const REVIEW_API_URL = `${API_BASE}/api/v1/review/`;
+// 서버가 주는 유저 스펙(웹에서 쓰는 AuthUser와 거의 동일하게 맞춤)
+type AuthUser = {
+  id: number;
+  github_id?: string;
+  login: string;
+  name?: string | null;
+  avatar_url?: string | null;
+  created_at?: string;
+};
 
-export function activate(context: vscode.ExtensionContext) {
+type WebviewMessage =
+  | { type: "REQUEST_FULL_DOCUMENT" }
+  | {
+      type: "REQUEST_ANALYZE";
+      payload?: {
+        code?: string;
+        filePath?: string;
+        languageId?: string;
+        model?: string;
+      };
+    }
+  | { type: "GET_AUTH_STATE" }
+  | { type: "OPEN_LOGIN" }
+  | { type: "OPEN_TOKEN_PAGE" }
+  | { type: "SET_TOKEN"; payload?: { token?: string } }
+  | { type: string; payload?: any };
+
+// ReviewRequest 스펙 참고용 타입
+type ReviewRequestPayload = {
+  meta: {
+    user_id: number | null;
+    review_id: number | null;
+    version: string;
+    actor: string;
+    code_fingerprint: string | null;
+    model: string | null;
+    result: {
+      result_ref: string | null;
+      error_message: string | null;
+    };
+    audit: {
+      created_at: string;
+      updated_at: string;
+    };
+  };
+  body: {
+    snippet: {
+      code: string;
+      language: string;
+    };
+    trigger: "manual" | "auto";
+  };
+};
+
+export async function activate(context: vscode.ExtensionContext) {
   console.log("DKMV Analyzer (React Webview) activated");
 
+  // 🔗 vscode://rockcha.dkmv/callback 으로 들어오는 URI 처리 (예전 플로우, 남겨둠)
+  const uriHandler = vscode.window.registerUriHandler({
+    async handleUri(uri: vscode.Uri) {
+      await handleUriCallback(uri, context);
+    },
+  });
+  context.subscriptions.push(uriHandler);
+
+  // ✅ VS Code 내에 토큰 설정용 커맨드 등록
+  const setTokenCmd = vscode.commands.registerCommand(
+    "dkmv.setToken",
+    async () => {
+      const token = await vscode.window.showInputBox({
+        prompt: "웹 대시보드에서 발급받은 DKMV 토큰을 붙여넣어 주세요.",
+        ignoreFocusOut: true,
+        password: true,
+      });
+      if (!token) return;
+      await setAuthToken(token, context);
+    }
+  );
+  context.subscriptions.push(setTokenCmd);
+
+  // 🔁 코드 선택 분석 명령
   const disposable = vscode.commands.registerCommand(
     "dkmv.analyzeSelection",
     async () => {
@@ -33,151 +125,9 @@ export function activate(context: vscode.ExtensionContext) {
       const filePath = editor.document.uri.fsPath;
       const languageId = editor.document.languageId;
 
-      // 웹뷰 패널 생성 (이미 있으면 재사용)
-      if (!panel) {
-        panel = vscode.window.createWebviewPanel(
-          "dkmvAnalyzer",
-          "DKMV Analyzer",
-          vscode.ViewColumn.Beside,
-          {
-            enableScripts: true,
-          }
-        );
+      ensureWebviewPanel(context);
 
-        panel.webview.html = getWebviewHtml(
-          panel.webview,
-          context.extensionUri
-        );
-
-        // 💌 웹뷰 → 익스텐션 메시지 처리
-        panel.webview.onDidReceiveMessage(
-          async (message: { type: string; payload?: any }) => {
-            if (!message || typeof message !== "object") return;
-
-            // 1) 현재 열린 파일의 전체 코드 다시 가져와서 웹뷰로 보내기
-            if (message.type === "REQUEST_FULL_DOCUMENT") {
-              const active = vscode.window.activeTextEditor;
-              if (!active) {
-                panel?.webview.postMessage({
-                  type: "ANALYZE_ERROR",
-                  payload: "열려 있는 파일이 없습니다.",
-                });
-                return;
-              }
-
-              const fullCode = active.document.getText();
-              if (!fullCode.trim()) {
-                panel?.webview.postMessage({
-                  type: "ANALYZE_ERROR",
-                  payload: "현재 파일이 비어 있습니다.",
-                });
-                return;
-              }
-
-              const fullFilePath = active.document.uri.fsPath;
-              const fullLanguageId = active.document.languageId;
-
-              panel?.webview.postMessage({
-                type: "NEW_CODE",
-                payload: {
-                  code: fullCode,
-                  fileName: active.document.fileName,
-                  filePath: fullFilePath,
-                  languageId: fullLanguageId,
-                  mode: "document",
-                },
-              });
-
-              return;
-            }
-
-            // 2) 분석 요청 처리
-            if (message.type === "REQUEST_ANALYZE") {
-              const payload = (message.payload ?? {}) as {
-                code?: string;
-                filePath?: string;
-                languageId?: string;
-                model?: string; // ← 웹뷰에서 선택한 모델
-              };
-
-              const codeSnippet = payload.code ?? "";
-              if (!codeSnippet.trim()) {
-                panel?.webview.postMessage({
-                  type: "ANALYZE_ERROR",
-                  payload: "분석할 코드가 비어 있습니다.",
-                });
-                return;
-              }
-
-              const filePathForReq = payload.filePath ?? filePath;
-              const languageForReq = payload.languageId ?? languageId;
-              const modelForReq = payload.model ?? undefined;
-
-              try {
-                panel?.webview.postMessage({
-                  type: "ANALYZE_PROGRESS",
-                  payload: "DKMV LLM에 코드 분석을 요청 중입니다...",
-                });
-
-                const body: any = {
-                  code_snippet: codeSnippet,
-                  language: languageForReq,
-                  file_path: filePathForReq,
-                };
-
-                // 백엔드가 model 필드를 받도록 되어 있다면 함께 전송
-                if (modelForReq) {
-                  body.model = modelForReq;
-                }
-
-                const response = await fetch(REVIEW_API_URL, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify(body),
-                });
-
-                if (!response.ok) {
-                  const text = await response.text();
-                  throw new Error(`HTTP ${response.status}: ${text}`);
-                }
-
-                const data = (await response.json()) as unknown;
-
-                panel?.webview.postMessage({
-                  type: "ANALYZE_RESULT",
-                  payload: data,
-                });
-              } catch (error) {
-                const messageText =
-                  error instanceof Error
-                    ? error.message
-                    : "서버 요청 중 알 수 없는 오류가 발생했습니다.";
-                panel?.webview.postMessage({
-                  type: "ANALYZE_ERROR",
-                  payload: messageText,
-                });
-              }
-            }
-          },
-          undefined,
-          context.subscriptions
-        );
-
-        panel.onDidDispose(
-          () => {
-            panel = undefined;
-          },
-          null,
-          context.subscriptions
-        );
-      } else {
-        panel.reveal(vscode.ViewColumn.Beside);
-      }
-
-      // 처음 명령 실행 시: 현재 코드 웹뷰에 전달
-      panel.webview.postMessage({
+      panel!.webview.postMessage({
         type: "NEW_CODE",
         payload: {
           code,
@@ -191,9 +141,440 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(disposable);
+
+  // 🔄 VS Code globalState 에 저장된 토큰 복원 시도
+  const savedToken = context.globalState.get<string>("dkmv.authToken");
+  if (savedToken) {
+    await setAuthToken(savedToken, context, { silent: true });
+  }
 }
 
 export function deactivate() {}
+
+/**
+ * (예전 OAuth 플로우용) vscode://rockcha.dkmv/callback?token=...
+ */
+async function handleUriCallback(
+  uri: vscode.Uri,
+  context: vscode.ExtensionContext
+) {
+  try {
+    const query = new URLSearchParams(uri.query);
+    const token = query.get("token");
+
+    if (!token) {
+      vscode.window.showErrorMessage("DKMV: 토큰 정보가 없습니다.");
+      return;
+    }
+
+    await setAuthToken(token, context);
+  } catch (e) {
+    console.error("[DKMV] handleUri error", e);
+    vscode.window.showErrorMessage("DKMV: 로그인 처리 중 오류가 발생했습니다.");
+  }
+}
+
+/**
+ * 🔐 토큰 설정 + /v1/users/me 검증 + webview에 AUTH_STATE 전파
+ */
+async function setAuthToken(
+  token: string,
+  context: vscode.ExtensionContext,
+  options?: { silent?: boolean }
+) {
+  try {
+    // ✅ 여기! 유저 검증은 AUTH_API_BASE (8000)로 보냄
+    const res = await fetch(`${AUTH_API_BASE}/v1/users/me`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`유효하지 않은 토큰입니다. (HTTP ${res.status})`);
+    }
+
+    const me = (await res.json()) as AuthUser;
+    authToken = token;
+    authUser = me;
+
+    await context.globalState.update("dkmv.authToken", token);
+
+    if (!options?.silent) {
+      vscode.window.showInformationMessage(
+        `DKMV: ${
+          me.login || me.name || "사용자"
+        }님, 토큰 인증이 완료되었습니다.`
+      );
+    }
+
+    if (panel) {
+      panel.webview.postMessage({
+        type: "AUTH_STATE",
+        payload: {
+          isAuthenticated: true,
+          user: authUser,
+        },
+      });
+    }
+  } catch (error) {
+    const msg =
+      error instanceof Error
+        ? error.message
+        : "토큰 설정 중 알 수 없는 오류가 발생했습니다.";
+
+    if (!options?.silent) {
+      vscode.window.showErrorMessage(`DKMV: ${msg}`);
+    }
+
+    authToken = null;
+    authUser = null;
+    await context.globalState.update("dkmv.authToken", undefined);
+
+    if (panel) {
+      panel.webview.postMessage({
+        type: "AUTH_STATE",
+        payload: {
+          isAuthenticated: false,
+          user: null,
+        },
+      });
+      panel.webview.postMessage({
+        type: "TOKEN_ERROR",
+        payload: msg,
+      });
+    }
+  }
+}
+
+function ensureWebviewPanel(context: vscode.ExtensionContext) {
+  if (panel) {
+    panel.reveal(vscode.ViewColumn.Beside);
+    return;
+  }
+
+  panel = vscode.window.createWebviewPanel(
+    "dkmvAnalyzer",
+    "DKMV Analyzer",
+    vscode.ViewColumn.Beside,
+    {
+      enableScripts: true,
+    }
+  );
+
+  panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri);
+
+  panel.webview.onDidReceiveMessage(
+    async (message: WebviewMessage) => {
+      if (!message || typeof message !== "object") return;
+
+      switch (message.type) {
+        case "REQUEST_FULL_DOCUMENT":
+          await handleRequestFullDocument();
+          break;
+
+        case "REQUEST_ANALYZE":
+          await handleRequestAnalyze(message.payload ?? {});
+          break;
+
+        case "GET_AUTH_STATE":
+          panel?.webview.postMessage({
+            type: "AUTH_STATE",
+            payload: {
+              isAuthenticated: !!authToken && !!authUser,
+              user: authUser,
+            },
+          });
+          break;
+
+        case "OPEN_LOGIN":
+          // 🔓 브라우저로 로그인 페이지 열기 (기존 플로우 유지하고 싶으면 사용)
+          vscode.env.openExternal(
+            vscode.Uri.parse(`${FRONTEND_URL}/login?from=extension`)
+          );
+          break;
+
+        case "OPEN_TOKEN_PAGE":
+          // 🔓 VS Code용 토큰 발급 페이지 열기
+          vscode.env.openExternal(vscode.Uri.parse(`${FRONTEND_URL}`));
+          break;
+
+        case "SET_TOKEN": {
+          const token = message.payload?.token as string | undefined;
+          if (!token) {
+            panel?.webview.postMessage({
+              type: "TOKEN_ERROR",
+              payload: "토큰이 비어 있습니다.",
+            });
+            return;
+          }
+          await setAuthToken(token, context);
+          break;
+        }
+
+        default:
+          console.warn("[DKMV] Unknown message.type from webview:", message);
+      }
+    },
+    undefined,
+    context.subscriptions
+  );
+
+  panel.onDidDispose(
+    () => {
+      panel = undefined;
+    },
+    null,
+    context.subscriptions
+  );
+}
+
+async function handleRequestFullDocument() {
+  const active = vscode.window.activeTextEditor;
+  if (!active) {
+    panel?.webview.postMessage({
+      type: "ANALYZE_ERROR",
+      payload: "열려 있는 파일이 없습니다.",
+    });
+    return;
+  }
+
+  const fullCode = active.document.getText();
+  if (!fullCode.trim()) {
+    panel?.webview.postMessage({
+      type: "ANALYZE_ERROR",
+      payload: "현재 파일이 비어 있습니다.",
+    });
+    return;
+  }
+
+  const fullFilePath = active.document.uri.fsPath;
+  const fullLanguageId = active.document.languageId;
+
+  panel?.webview.postMessage({
+    type: "NEW_CODE",
+    payload: {
+      code: fullCode,
+      fileName: active.document.fileName,
+      filePath: fullFilePath,
+      languageId: fullLanguageId,
+      mode: "document",
+    },
+  });
+}
+
+/**
+ * 코드 분석 요청:
+ *  1) POST /v1/reviews/request   → 리뷰 생성 + review_id 받기
+ *  2) GET  /v1/reviews/{id}      → 실제 리뷰 결과 조회
+ * 각 단계마다 ANALYZE_PROGRESS로 단계 표시
+ */
+async function handleRequestAnalyze(payload: {
+  code?: string;
+  filePath?: string;
+  languageId?: string;
+  model?: string;
+}) {
+  // 🔐 로그인 강제: 토큰 없으면 거절
+  if (!authToken || !authUser) {
+    panel?.webview.postMessage({
+      type: "ANALYZE_ERROR",
+      payload: "분석을 사용하려면 VS Code 토큰을 먼저 설정해야 합니다.",
+    });
+    return;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  const fallbackFilePath = editor?.document.uri.fsPath ?? "";
+  const fallbackLanguageId = editor?.document.languageId ?? "";
+
+  const codeSnippet = payload.code ?? "";
+  if (!codeSnippet.trim()) {
+    panel?.webview.postMessage({
+      type: "ANALYZE_ERROR",
+      payload: "분석할 코드가 비어 있습니다.",
+    });
+    return;
+  }
+
+  const filePathForReq = payload.filePath ?? fallbackFilePath;
+  const languageForReq =
+    payload.languageId ?? (fallbackLanguageId || "plaintext");
+  const modelForReq = payload.model ?? "qwen2.5-coder-7b";
+
+  try {
+    // 1/6: LLM 요청 준비
+    panel?.webview.postMessage({
+      type: "ANALYZE_PROGRESS",
+      payload: "1/6 • LLM 리뷰 요청을 준비 중입니다...",
+    });
+
+    const nowIso = new Date().toISOString();
+
+    const body: ReviewRequestPayload = {
+      meta: {
+        user_id: authUser?.id ?? null,
+        review_id: null,
+        version: "v1",
+        actor: "vscode-extension",
+        code_fingerprint: null,
+        model: modelForReq,
+        result: {
+          result_ref: null,
+          error_message: null,
+        },
+        audit: {
+          created_at: nowIso,
+          updated_at: nowIso,
+        },
+      },
+      body: {
+        snippet: {
+          code: codeSnippet,
+          language: languageForReq,
+        },
+        trigger: "manual",
+      },
+    };
+
+    // 2/6: POST /v1/reviews/request
+    panel?.webview.postMessage({
+      type: "ANALYZE_PROGRESS",
+      payload: "2/6 • LLM 서버로 리뷰 요청을 전송 중입니다...",
+    });
+
+    const postResp = await fetch(REVIEW_REQUEST_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const postText = await postResp.text();
+    if (!postResp.ok) {
+      throw new Error(`리뷰 생성 실패 (HTTP ${postResp.status}): ${postText}`);
+    }
+
+    let reviewId: number | null = null;
+    let postJson: any = null;
+
+    try {
+      postJson = JSON.parse(postText);
+      reviewId = postJson?.body?.review_id ?? null;
+    } catch {
+      // JSON 파싱 실패 시 그대로 넘어감
+    }
+
+    if (reviewId == null) {
+      throw new Error("리뷰 생성 응답에서 review_id를 찾을 수 없습니다.");
+    }
+
+    // 3/6: LLM 요청 성공
+    panel!.webview.postMessage({
+      type: "ANALYZE_PROGRESS",
+      payload: `3/6 • LLM 리뷰 요청 성공 (review_id: ${reviewId}). LLM 응답을 기다리는 중입니다...`,
+    });
+
+    // 4/6: 결과 조회 준비
+    panel!.webview.postMessage({
+      type: "ANALYZE_PROGRESS",
+      payload: "4/6 • 서버에 저장된 리뷰 결과를 가져올 준비를 하고 있습니다...",
+    });
+
+    // 5/6: GET /v1/reviews/{review_id}
+    const getUrl = `${REVIEW_GET_URL}/${reviewId}`;
+    panel!.webview.postMessage({
+      type: "ANALYZE_PROGRESS",
+      payload: "5/6 • 서버에서 리뷰 결과를 가져오는 중입니다...",
+    });
+
+    const getResp = await fetch(getUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    const getText = await getResp.text();
+    if (!getResp.ok) {
+      throw new Error(`리뷰 조회 실패 (HTTP ${getResp.status}): ${getText}`);
+    }
+
+    let getJson: any = null;
+    try {
+      getJson = JSON.parse(getText);
+    } catch {
+      getJson = getText;
+    }
+
+    const analyzerResult = extractAnalyzerResultFromResponse(getJson);
+
+    // 6/6: 최종 성공
+    panel!.webview.postMessage({
+      type: "ANALYZE_PROGRESS",
+      payload: "6/6 • 리뷰 결과 수신 완료! 분석 내용을 표시합니다.",
+    });
+
+    panel!.webview.postMessage({
+      type: "ANALYZE_RESULT",
+      payload: {
+        phase: "success",
+        review_id: reviewId,
+        request_payload: body,
+        raw_review_response: getJson,
+        analyzer_result: analyzerResult,
+      },
+    });
+  } catch (error) {
+    const messageText =
+      error instanceof Error
+        ? error.message
+        : "서버 요청 중 알 수 없는 오류가 발생했습니다.";
+
+    panel?.webview.postMessage({
+      type: "ANALYZE_PROGRESS",
+      payload: "⚠️ 리뷰 처리 중 오류가 발생했습니다.",
+    });
+
+    panel?.webview.postMessage({
+      type: "ANALYZE_ERROR",
+      payload: messageText,
+    });
+  }
+}
+
+// 응답 안에서 AnalyzerResult 후보를 찾는 헬퍼
+function extractAnalyzerResultFromResponse(resp: any): any {
+  if (!resp || typeof resp !== "object") return resp;
+
+  const candidates = [
+    resp?.analyzer_result,
+    resp?.body?.review,
+    resp?.body?.result,
+    resp?.body,
+    resp?.review,
+    resp,
+  ];
+
+  for (const c of candidates) {
+    if (!c || typeof c !== "object") continue;
+    if (
+      "quality_score" in c ||
+      "qualityScore" in c ||
+      "global_score" in c ||
+      "review_summary" in c ||
+      "scores_by_category" in c ||
+      "review_details" in c ||
+      "issues" in c
+    ) {
+      return c;
+    }
+  }
+  return resp;
+}
 
 function getWebviewHtml(
   webview: vscode.Webview,
