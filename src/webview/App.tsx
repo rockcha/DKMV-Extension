@@ -1,6 +1,6 @@
 // src/webview/App.tsx
-import React, { useEffect, useState } from "react";
 
+import React, { useEffect, useState } from "react";
 import type {
   IncomingMessage,
   AnalyzerResult,
@@ -11,6 +11,16 @@ import { EMPTY_CATEGORIES } from "./types";
 import { clampScore, extractScoresByCategory } from "./utils/scoring";
 import CodePanel from "./components/CodePanel";
 import ResultPanel from "./components/ResultPanel";
+import {
+  Bot,
+  Code2,
+  FileText,
+  Key,
+  Shield,
+  ExternalLink,
+  Bell,
+  LogOut,
+} from "lucide-react";
 
 declare global {
   interface Window {
@@ -36,6 +46,12 @@ type AuthStateMessage = {
   };
 };
 
+type ReviewMetaCompact = {
+  reviewId: number | null;
+  model?: string | null;
+  audit?: string | null;
+};
+
 export const App: React.FC = () => {
   const logoSrc = window.__DKMV_LOGO__ ?? "/logo.png";
 
@@ -46,12 +62,13 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<TabId>("code");
+  // ✅ 탭: "token" | "code" | "result"
+  const [activeTab, setActiveTab] = useState<TabId>("token");
 
-  const [resultMessage, setResultMessage] = useState<string>(
-    "분석 결과가 이 영역에 표시됩니다."
-  );
+  const [resultMessage, setResultMessage] =
+    useState<string>("이곳에 메세지가 표시됩니다.");
   const [resultData, setResultData] = useState<AnalyzerResult | null>(null);
+  const [reviewMeta, setReviewMeta] = useState<ReviewMetaCompact | null>(null);
 
   const [rawResponseText, setRawResponseText] = useState<string | null>(null);
 
@@ -68,7 +85,7 @@ export const App: React.FC = () => {
   const [displayCategoryScores, setDisplayCategoryScores] =
     useState<ScoreCategories>(EMPTY_CATEGORIES);
 
-  // 🔐 익스텐션에서 전달받는 로그인 상태
+  // 🔐 익스텐션에서 전달받는 로그인 상태 (GitHub + VSCode 토큰)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -95,7 +112,7 @@ export const App: React.FC = () => {
       const message = event.data;
       if (!message) return;
 
-      // 🔐 로그인 상태 동기화
+      // 🔐 로그인/토큰 상태 동기화
       if (message.type === "AUTH_STATE") {
         const authed = !!message.payload?.isAuthenticated;
         const user = message.payload?.user ?? null;
@@ -103,16 +120,19 @@ export const App: React.FC = () => {
         setIsAuthenticated(authed);
         setAuthUser(user);
         setIsSettingToken(false);
+        setReviewMeta(null);
 
         if (!authed) {
           setResultMessage(
             "GitHub 로그인 및 토큰 인증 후 코드를 리뷰할 수 있습니다."
           );
+          setActiveTab("token");
         } else {
           const name = user?.login ?? "사용자";
           setResultMessage(
             `${name}님 환영합니다. 토큰 인증이 완료되었습니다. 코드를 선택하고 리뷰를 시작해보세요.`
           );
+          setActiveTab("code");
         }
 
         return;
@@ -139,8 +159,9 @@ export const App: React.FC = () => {
         setIsLoading(false);
         setResultData(null);
         setRawResponseText(null);
+        setReviewMeta(null);
         setResultMessage(
-          "코드를 받았습니다. 모델을 선택한 뒤 [분석] 버튼 또는 Ctrl+Enter로 리뷰를 시작하세요."
+          "코드를 받았습니다. 모델을 선택한 뒤 아래 [분석] 버튼 또는 Ctrl+Enter로 리뷰를 시작하세요."
         );
         setDisplayOverallScore(0);
         setDisplayCategoryScores(EMPTY_CATEGORIES);
@@ -161,6 +182,7 @@ export const App: React.FC = () => {
         setIsLoading(false);
         setResultData(null);
         setRawResponseText(null);
+        setReviewMeta(null);
         setResultMessage(`오류 발생: ${message.payload}`);
         setDisplayOverallScore(0);
         setDisplayCategoryScores(EMPTY_CATEGORIES);
@@ -172,36 +194,52 @@ export const App: React.FC = () => {
       if (message.type === "ANALYZE_RESULT") {
         setIsLoading(false);
 
-        let parsed: any = message.payload;
+        const wrapper: any = message.payload;
+        let parsed: any = wrapper;
         let rawText: string | null = null;
 
-        if (typeof message.payload === "string") {
-          rawText = message.payload;
+        if (typeof wrapper === "string") {
+          rawText = wrapper;
           try {
-            parsed = JSON.parse(message.payload);
+            parsed = JSON.parse(wrapper);
           } catch (e) {
             console.warn("[DKMV] 응답 JSON 파싱 실패:", e);
             setResultData(null);
             setRawResponseText(rawText);
             setResultMessage("응답은 왔지만 JSON 파싱에 실패했습니다.");
             setIsError(true);
+            setReviewMeta(null);
             return;
           }
         } else {
           try {
-            rawText = JSON.stringify(message.payload, null, 2);
+            rawText = JSON.stringify(wrapper, null, 2);
           } catch {
             rawText = null;
           }
         }
 
         const inner =
-          (parsed && (parsed as any).analyzer_result) ||
-          (parsed && (parsed as any).body?.review) ||
+          (parsed && parsed.analyzer_result) ||
+          (parsed && parsed.body?.review) ||
           parsed;
+
+        const compactMeta: ReviewMetaCompact = {
+          reviewId: parsed?.review_id ?? null,
+          model:
+            inner?.model ??
+            parsed?.request_payload?.meta?.model ??
+            parsed?.raw_review_response?.meta?.model ??
+            null,
+          audit:
+            parsed?.raw_review_response?.meta?.audit?.created_at ??
+            parsed?.raw_review_response?.meta?.audit ??
+            undefined,
+        };
 
         setRawResponseText(rawText);
         setResultData(inner as AnalyzerResult);
+        setReviewMeta(compactMeta);
         setResultMessage("분석이 완료되었습니다.");
         setActiveTab("result");
         flashResultHighlight();
@@ -212,7 +250,6 @@ export const App: React.FC = () => {
 
     window.addEventListener("message", handler);
 
-    // 최초 진입 시 현재 auth 상태 요청
     if (vscode) {
       vscode.postMessage({ type: "GET_AUTH_STATE" });
     }
@@ -223,10 +260,11 @@ export const App: React.FC = () => {
   const handleAnalyze = () => {
     if (!isAuthenticated) {
       setResultMessage(
-        "VS Code용 토큰을 먼저 설정해야 합니다. 상단 안내를 확인해주세요."
+        "VS Code용 토큰을 먼저 설정해야 합니다. 상단 [토큰 인증] 탭에서 토큰을 연결해 주세요."
       );
       setResultData(null);
       setRawResponseText(null);
+      setReviewMeta(null);
       setDisplayOverallScore(0);
       setDisplayCategoryScores(EMPTY_CATEGORIES);
       setIsError(true);
@@ -237,10 +275,11 @@ export const App: React.FC = () => {
 
     if (!code.trim()) {
       setResultMessage(
-        "분석할 코드가 없습니다. VS Code에서 코드를 선택 후 실행하거나 왼쪽에 코드를 붙여넣어 주세요."
+        "분석할 코드가 없습니다. 파일에서 코드를 선택 후 실행하거나 왼쪽에 코드를 붙여넣어 주세요."
       );
       setResultData(null);
       setRawResponseText(null);
+      setReviewMeta(null);
       setDisplayOverallScore(0);
       setDisplayCategoryScores(EMPTY_CATEGORIES);
       setIsError(false);
@@ -252,6 +291,7 @@ export const App: React.FC = () => {
       setResultMessage("사용할 모델을 먼저 선택해 주세요.");
       setResultData(null);
       setRawResponseText(null);
+      setReviewMeta(null);
       setDisplayOverallScore(0);
       setDisplayCategoryScores(EMPTY_CATEGORIES);
       setIsError(true);
@@ -264,6 +304,7 @@ export const App: React.FC = () => {
       setResultMessage("VS Code API를 사용할 수 없습니다.");
       setResultData(null);
       setRawResponseText(null);
+      setReviewMeta(null);
       setDisplayOverallScore(0);
       setDisplayCategoryScores(EMPTY_CATEGORIES);
       setIsError(true);
@@ -326,8 +367,6 @@ export const App: React.FC = () => {
   };
 
   const handleLogoutClick = () => {
-    // 실제 백엔드 로그아웃이 아니라, 웹뷰 상태만 초기화해서
-    // 다시 토큰 인증 랜딩 화면으로 돌아가도록 처리
     setIsAuthenticated(false);
     setAuthUser(null);
     setTokenInput("");
@@ -336,12 +375,13 @@ export const App: React.FC = () => {
 
     setResultData(null);
     setRawResponseText(null);
+    setReviewMeta(null);
     setResultMessage(
       "GitHub 로그인 및 토큰 인증 후 코드를 리뷰할 수 있습니다."
     );
     setDisplayOverallScore(0);
     setDisplayCategoryScores(EMPTY_CATEGORIES);
-    setActiveTab("code");
+    setActiveTab("token");
     setIsError(false);
     setHasNewResult(false);
 
@@ -401,8 +441,13 @@ export const App: React.FC = () => {
   const statusColor = (() => {
     if (isError) return "#fca5a5";
     if (isLoading) return "#c4b5fd";
-    return "#a855f7"; // 기본도 보라 계열
+    return "#a855f7";
   })();
+
+  const displayMessage =
+    resultMessage && resultMessage.trim().length > 0
+      ? resultMessage
+      : "이곳에 메세지가 표시됩니다.";
 
   return (
     <>
@@ -414,27 +459,55 @@ export const App: React.FC = () => {
               transform: scale(1);
             }
             50% {
-              filter: hue-rotate(15deg) brightness(1.15);
-              transform: scale(1.02);
+              filter: hue-rotate(12deg) brightness(1.12);
+              transform: scale(1.03);
             }
             100% {
-              filter: hue-rotate(-10deg) brightness(0.98);
+              filter: hue-rotate(-8deg) brightness(0.98);
               transform: scale(1);
             }
           }
 
-          .dkmv-score-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 8px;
+          .dkmv-link-btn,
+          .dkmv-token-btn {
+            position: relative;
+            overflow: hidden;
+            transition:
+              transform 0.16s ease-out,
+              box-shadow 0.16s ease-out,
+              background 0.16s ease-out,
+              opacity 0.16s ease-out,
+              border-color 0.16s ease-out;
           }
-          @media (max-width: 520px) {
-            .dkmv-score-grid {
-              grid-template-columns: 1fr;
-            }
+          .dkmv-link-btn::before,
+          .dkmv-token-btn::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            background: radial-gradient(
+              circle at 0% 0%,
+              rgba(248,250,252,0.12),
+              transparent 60%
+            );
+            transition: opacity 0.22s ease-out;
+          }
+          .dkmv-link-btn:hover::before,
+          .dkmv-token-btn:hover::before {
+            opacity: 1;
+          }
+          .dkmv-link-btn:hover,
+          .dkmv-token-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 20px rgba(15,23,42,0.75);
+          }
+          .dkmv-link-btn:active,
+          .dkmv-token-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 3px 10px rgba(15,23,42,0.9);
           }
 
-          /* 아바타 버튼 + 툴팁 */
+          /* 아바타 버튼 */
           .dkmv-avatar-button {
             position: relative;
             padding: 0;
@@ -468,17 +541,144 @@ export const App: React.FC = () => {
             transform: translateY(0);
           }
 
-          /* 토큰 안내 칩 */
-          .dkmv-token-chip {
-            display: inline-flex;
+          /* 토큰 탭 레이아웃 */
+          .dkmv-token-root {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justifyContent: center;
+            padding: 16px 10px 18px;
+            box-sizing: border-box;
+          }
+
+          .dkmv-token-card {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 16px;
+            border: 1px solid rgba(31,41,55,0.95);
+            background: radial-gradient(circle at 0% 0%, #020617, #020617);
+            padding: 18px 20px 20px;
+            box-shadow:
+              0 18px 40px rgba(15,23,42,0.9),
+              0 0 0 1px rgba(15,23,42,0.85);
+          }
+
+          .dkmv-token-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+            text-align: center;
+            letter-spacing: 0.03em;
+          }
+
+          .dkmv-token-sub {
+            margin-top: 8px;
+            font-size: 11px;
+            line-height: 1.7;
+            color: #9ca3af;
+            text-align: center;
+          }
+
+          .dkmv-token-actions {
+            margin-top: 14px;
+            display: flex;
+            justify-content: center;
+          }
+
+          .dkmv-token-input-wrap {
+            margin-top: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+          }
+
+          .dkmv-token-input-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            width: 100%;
+          }
+
+          .dkmv-token-input {
+            flex: 1 1 260px;
+            max-width: 420px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(55,65,81,0.95);
+            background-color: #020617;
+            color: #e5e7eb;
+            font-size: 11px;
+            font-family:
+              ui-monospace,
+              SFMono-Regular,
+              Menlo,
+              Monaco,
+              Consolas,
+              "Liberation Mono",
+              "Courier New",
+              monospace;
+            outline: none;
+            box-sizing: border-box;
+            transition:
+              border-color 0.15s ease-out,
+              box-shadow 0.15s ease-out,
+              background 0.15s ease-out;
+          }
+
+          .dkmv-token-input:focus {
+            border-color: rgba(129,140,248,1);
+            box-shadow: 0 0 0 1px rgba(129,140,248,0.85);
+            background: #020617;
+          }
+
+          .dkmv-token-error {
+            font-size: 10px;
+            color: #fecaca;
+            text-align: center;
+          }
+
+          .dkmv-token-foot {
+            margin-top: 8px;
+            display: flex;
+            justify-content: center;
             align-items: center;
             gap: 6px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            border: 1px solid rgba(167,139,250,0.9);
-            background: radial-gradient(circle at top left, rgba(129,140,248,0.25), rgba(15,23,42,0.95));
+            font-size: 10px;
+            color: #6b7280;
+          }
+
+          .dkmv-token-authed {
+            margin-bottom: 14px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+          }
+
+          .dkmv-token-authed-main {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+
+          .dkmv-token-authed-text {
+            font-size: 12px;
+            color: #c7d2fe;
+          }
+
+          .dkmv-token-authed-sub {
             font-size: 11px;
-            color: #e5e7eb;
+            color: #9ca3af;
+            text-align: center;
+          }
+
+          @media (max-width: 640px) {
+            .dkmv-token-card {
+              padding: 16px 14px 18px;
+            }
           }
         `}
       </style>
@@ -486,17 +686,19 @@ export const App: React.FC = () => {
       <div
         style={{
           fontFamily:
-            "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+            "'Gowun Dodum', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
           padding: "12px 14px",
           display: "flex",
           flexDirection: "column",
           gap: "10px",
           boxSizing: "border-box",
           background:
-            "linear-gradient(135deg, #020617 0%, #030712 40%, #1e1b4b 100%)",
+            "linear-gradient(135deg, #020617 0%, #030712 40%, #020617 100%)",
           color: "#e5e7eb",
           minHeight: "100vh",
-          height: isLoading ? "100vh" : "auto",
+          maxWidth: 1200, // ✅ 넓은 화면에서 가운데 정렬
+          margin: "0 auto",
+          width: "100%",
         }}
       >
         {/* 헤더 */}
@@ -507,7 +709,7 @@ export const App: React.FC = () => {
             justifyContent: "space-between",
             gap: 12,
             paddingBottom: 6,
-            borderBottom: "1px solid rgba(79,70,229,0.5)",
+            borderBottom: "1px solid rgba(31,41,55,0.9)",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -532,14 +734,6 @@ export const App: React.FC = () => {
               >
                 Don&apos;t Kill My Vibe
               </span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "#a5b4fc",
-                }}
-              >
-                VS Code 코드 리뷰 익스텐션
-              </span>
             </div>
           </div>
 
@@ -551,7 +745,6 @@ export const App: React.FC = () => {
               flexShrink: 0,
             }}
           >
-            {/* 로그인 상태 표시 + 로그아웃 액션 */}
             {isAuthenticated && authUser && (
               <button
                 type="button"
@@ -562,7 +755,7 @@ export const App: React.FC = () => {
                   style={{
                     fontSize: 11,
                     color: "#c4b5fd",
-                    maxWidth: 120,
+                    maxWidth: 140,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
@@ -590,399 +783,462 @@ export const App: React.FC = () => {
           </div>
         </header>
 
-        {/* 🔐 토큰 설정 / 로그인 랜딩 화면 */}
-        {!isAuthenticated && (
+        {/* 메인 */}
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            marginTop: 10,
+            gap: 6,
+          }}
+        >
+          {/* 탭 헤더 */}
           <div
             style={{
-              marginTop: 18,
-              padding: 18,
-              borderRadius: 14,
-              border: "1px solid rgba(88,28,135,0.8)",
-              background:
-                "radial-gradient(circle at top, rgba(129,140,248,0.3), rgba(15,23,42,0.98))",
               display: "flex",
-              flexDirection: "column",
-              gap: 12,
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              paddingTop: 4,
+              paddingBottom: 4,
+              borderBottom: "1px solid rgba(31,41,55,0.9)",
             }}
           >
-            {/* 상단 설명 */}
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 10,
-                alignItems: "flex-start",
-                flexWrap: "wrap",
+                display: "inline-flex",
+                padding: 2,
+                borderRadius: 999,
+                backgroundColor: "rgba(15,23,42,0.9)",
+                border: "1px solid rgba(31,41,55,0.9)",
+                gap: 2,
               }}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                  }}
-                >
-                  GitHub 인증 후 DKMV 리뷰를 시작해요
-                </span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "#e5e7eb",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  DKMV는 웹에서 GitHub 계정으로 로그인한 뒤 발급받은{" "}
-                  <strong style={{ fontWeight: 500 }}>VS Code 전용 토큰</strong>
-                  으로만 사용 가능합니다.
-                  <br />
-                  아래 절차에 따라 토큰을 설정한 후, 이 익스텐션에서 리뷰를
-                  실행할 수 있습니다.
-                </span>
-              </div>
+              {(["token", "code", "result"] as TabId[]).map((id) => {
+                const label =
+                  id === "token"
+                    ? "토큰 인증"
+                    : id === "code"
+                    ? "입력 코드"
+                    : "리뷰 결과";
+                const Icon =
+                  id === "token" ? Key : id === "code" ? Code2 : FileText;
 
-              <span className="dkmv-token-chip">
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background:
-                      "radial-gradient(circle, #22c55e, #15803d, #166534)",
-                  }}
-                />
-                <span>웹에서 GitHub 로그인 → 토큰 발행</span>
+                const isActive = activeTab === id;
+                const showBadge = id === "result" && hasNewResult;
+
+                // 🔒 토큰 미인증 시 code / result 탭 이동 불가
+                const lockedByAuth = !isAuthenticated && id !== "token";
+                const disabled =
+                  lockedByAuth || (isLoading && !isActive && id !== "token");
+
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      if (disabled) return;
+                      setActiveTab(id);
+                      if (id === "result") {
+                        setHasNewResult(false);
+                      }
+                    }}
+                    style={{
+                      padding: "6px 11px",
+                      fontSize: 11,
+                      borderRadius: 999,
+                      border: "none",
+                      backgroundColor: isActive
+                        ? "rgba(15,23,42,1)"
+                        : "transparent",
+                      color: disabled
+                        ? "rgba(75,85,99,0.8)"
+                        : isActive
+                        ? "#e5e7eb"
+                        : "#9ca3af",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      outline: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      opacity: disabled ? 0.65 : 1,
+                      boxShadow: isActive
+                        ? "0 0 0 1px rgba(129,140,248,0.9)"
+                        : "none",
+                      transition:
+                        "background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease",
+                    }}
+                  >
+                    <Icon size={13} />
+                    <span>{label}</span>
+                    {showBadge && !disabled && (
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: 6,
+                          height: 6,
+                          borderRadius: 999,
+                          backgroundColor: "#a855f7",
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 상태 + 알림 아이콘 바 */}
+          <div
+            style={{
+              marginTop: 4,
+              marginBottom: 4,
+              fontSize: 11,
+              minHeight: 24,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              padding: "0 4px",
+              flexWrap: "wrap", // ✅ 좁은 폭에서 줄바꿈 허용
+            }}
+          >
+            {/* 🔔 상태 메시지 pill */}
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "4px 10px",
+                borderRadius: 999,
+                backgroundColor: "rgba(15,23,42,0.95)",
+                border: "1px solid rgba(31,41,55,0.9)",
+                color: statusColor,
+                flex: "1 1 260px",
+                minWidth: 0,
+                maxWidth: "100%",
+              }}
+            >
+              <Bell size={13} color="#a855f7" />
+              <span
+                style={{
+                  fontWeight: 500,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis", // ✅ 메세지 길어져도 한 줄로
+                }}
+              >
+                {displayMessage}
               </span>
             </div>
 
-            {/* 절차 안내 + 웹 이동 버튼 */}
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-                marginTop: 4,
-              }}
-            >
-              <ol
-                style={{
-                  fontSize: 11,
-                  color: "#e5e7eb",
-                  paddingLeft: 18,
-                  margin: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
-                }}
-              >
-                <li>1. DKMV 웹에서 GitHub로 로그인합니다.</li>
-                <li>2. 설정/프로필에서 VS Code용 토큰을 발급합니다.</li>
-                <li>3. 아래 입력창에 토큰을 붙여넣고 저장합니다.</li>
-              </ol>
-
+            {/* 선택된 모델 표시 pill – 길어져도 레이아웃 유지 */}
+            {selectedModel && (
               <div
                 style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={handleOpenTokenPage}
-                  style={{
-                    padding: "7px 13px",
-                    fontSize: 12,
-                    borderRadius: 8,
-                    border: "1px solid rgba(129,140,248,0.9)",
-                    background:
-                      "linear-gradient(120deg, rgba(79,70,229,0.95), rgba(147,197,253,0.9))",
-                    color: "#0b1120",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontWeight: 500,
-                  }}
-                >
-                  <span>DKMV 웹 열기 (GitHub 로그인)</span>
-                  <span style={{ fontSize: 11 }}>↗</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 토큰 입력 박스 */}
-            <div
-              style={{
-                marginTop: 10,
-                padding: 12,
-                borderRadius: 12,
-                background:
-                  "linear-gradient(145deg, rgba(15,23,42,0.98), rgba(15,23,42,1))",
-                border: "1px solid rgba(55,65,81,0.9)",
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-              }}
-            >
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "#a5b4fc",
-                  display: "flex",
-                  justifyContent: "space-between",
+                  display: "inline-flex",
                   alignItems: "center",
-                }}
-              >
-                <span>발급받은 VS Code 토큰</span>
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: "#9ca3af",
-                  }}
-                >
-                  복사한 값을 그대로 붙여넣어 주세요
-                </span>
-              </label>
-
-              <textarea
-                rows={2}
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                style={{
-                  width: "100%",
-                  resize: "vertical",
-                  minHeight: 46,
-                  padding: 8,
-                  borderRadius: 8,
-                  border: "1px solid rgba(75,85,99,0.9)",
-                  backgroundColor: "#020617",
+                  gap: 6,
+                  fontSize: 11,
                   color: "#e5e7eb",
-                  fontSize: 11,
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-                }}
-                placeholder="DKMV 웹에서 발급받은 토큰을 입력해주세요..."
-              />
-              {tokenError && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "#fca5a5",
-                  }}
-                >
-                  {tokenError}
-                </span>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  marginTop: 4,
-                  gap: 8,
-                  alignItems: "center",
+                  opacity: 0.9,
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(55,65,81,0.9)",
+                  backgroundColor: "rgba(15,23,42,0.96)",
+                  flexShrink: 0,
+                  maxWidth: 260, // ✅ 너무 길어지지 않게 제한
                 }}
               >
-                {isSettingToken && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: "#a5b4fc",
-                    }}
-                  >
-                    토큰을 확인하는 중입니다...
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleSubmitToken}
-                  disabled={isSettingToken}
+                <Bot size={14} color="#a855f7" />
+                <span
                   style={{
-                    padding: "6px 14px",
-                    fontSize: 12,
-                    borderRadius: 8,
-                    border: "1px solid rgba(129,140,248,0.9)",
-                    background:
-                      "linear-gradient(90deg,rgba(129,140,248,1),rgba(168,85,247,0.95))",
-                    color: "#020617",
-                    cursor: isSettingToken ? "default" : "pointer",
-                    opacity: isSettingToken ? 0.75 : 1,
-                    fontWeight: 500,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
                   }}
+                  title={selectedModel}
                 >
-                  {isSettingToken ? "토큰 확인 중..." : "토큰 저장"}
-                </button>
+                  {selectedModel}
+                </span>
               </div>
-            </div>
+            )}
           </div>
-        )}
 
-        {/* 🔍 인증된 상태에서만 기존 탭 + 분석 UI 표시 */}
-        {isAuthenticated && (
-          <>
-            {/* 탭 헤더 + 분석 버튼 (한 줄) */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                borderBottom: "1px solid rgba(31,41,55,0.9)",
-                gap: 8,
-                paddingTop: 8,
-                paddingBottom: 4,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  gap: 4,
-                }}
-              >
-                {(["code", "result"] as TabId[]).map((id) => {
-                  const label = id === "code" ? "입력 코드" : "분석 결과";
-                  const isActive = activeTab === id;
-                  const showBadge = id === "result" && hasNewResult;
-                  const disabled = isLoading && !isActive;
-
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        if (disabled) return;
-                        setActiveTab(id);
-                        if (id === "result") {
-                          setHasNewResult(false);
-                        }
-                      }}
+          {/* 탭 콘텐츠 */}
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              marginTop: 2,
+            }}
+          >
+            {/* 🔐 토큰 탭 */}
+            {activeTab === "token" && (
+              <div className="dkmv-token-root">
+                <div className="dkmv-token-card">
+                  {isAuthenticated && authUser ? (
+                    // ✅ 인증된 상태: 아바타 + 멘트 + 로그아웃만
+                    <div
+                      className="dkmv-token-authed"
                       style={{
-                        padding: "6px 12px",
-                        fontSize: 12,
-                        border: "1px solid transparent",
-                        borderRadius: 8,
-                        backgroundColor: isActive
-                          ? "rgba(30,64,175,0.35)"
-                          : "transparent",
-                        color: disabled
-                          ? "rgba(75,85,99,0.85)"
-                          : isActive
-                          ? "#e5e7eb"
-                          : "#9ca3af",
-                        cursor: disabled ? "not-allowed" : "pointer",
-                        outline: "none",
                         display: "flex",
+                        flexDirection: "column",
                         alignItems: "center",
-                        gap: 6,
-                        opacity: disabled ? 0.6 : 1,
+                        gap: 12,
+                        paddingTop: 8,
+                        paddingBottom: 8,
                       }}
                     >
-                      <span>{label}</span>
-                      {showBadge && !disabled && (
-                        <span
+                      <img
+                        src={
+                          authUser.avatar_url ||
+                          "https://avatars.githubusercontent.com/u/0?v=4"
+                        }
+                        alt={authUser.login}
+                        style={{
+                          width: 48,
+                          height: 48,
+                          borderRadius: 999,
+                          objectFit: "cover",
+                          border: "1px solid rgba(165,180,252,0.9)",
+                        }}
+                      />
+                      <div style={{ textAlign: "center" }}>
+                        <div
                           style={{
-                            display: "inline-block",
-                            width: 6,
-                            height: 6,
-                            borderRadius: 999,
-                            backgroundColor: "#a855f7",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: "#e5e7eb",
                           }}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
+                        >
+                          {authUser.login}님, 인증되었습니다.
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 11,
+                            color: "#9ca3af",
+                          }}
+                        >
+                          이제 에디터에서 DKMV 코드 리뷰를 바로 사용할 수
+                          있어요.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleLogoutClick}
+                        className="dkmv-token-btn"
+                        style={{
+                          padding: "7px 16px",
+                          fontSize: 11,
+                          borderRadius: 999,
+                          border: "1px solid rgba(248,113,113,0.95)",
+                          background:
+                            "linear-gradient(90deg,rgba(239,68,68,1),rgba(248,113,113,1))",
+                          color: "#f9fafb",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          marginTop: 2,
+                        }}
+                      >
+                        <LogOut size={14} />
+                        <span>로그아웃</span>
+                      </button>
+                    </div>
+                  ) : (
+                    // ✅ 로그아웃 상태: 토큰 안내 UI 전부
+                    <>
+                      {/* 미니멀 아이콘 헤더 */}
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "center",
+                          gap: 10,
+                          marginBottom: 10,
+                          opacity: 0.9,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 999,
+                            border: "1px solid rgba(129,140,248,0.9)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: "rgba(15,23,42,0.9)",
+                          }}
+                        >
+                          <Key size={14} color="#a855f7" />
+                        </div>
+                        <div
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 999,
+                            border: "1px solid rgba(148,163,184,0.9)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: "rgba(15,23,42,0.9)",
+                          }}
+                        >
+                          <Code2 size={14} color="#e5e7eb" />
+                        </div>
+                        <div
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 999,
+                            border: "1px solid rgba(56,189,248,0.9)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: "rgba(15,23,42,0.9)",
+                          }}
+                        >
+                          <Shield size={14} color="#38bdf8" />
+                        </div>
+                      </div>
+
+                      {/* 제목 / 설명 */}
+                      <div>
+                        <h2 className="dkmv-token-title">DKMV 토큰 인증하기</h2>
+                        <p className="dkmv-token-sub">
+                          웹 대시보드에서 GitHub로 로그인한 뒤 발급받은{" "}
+                          <strong style={{ fontWeight: 500 }}>
+                            VS Code 토큰
+                          </strong>
+                          을 붙여넣으면,
+                          <br />
+                          에디터에서 바로 AI 코드 리뷰를 사용할 수 있습니다.
+                        </p>
+                      </div>
+
+                      {/* 웹으로 가기 버튼 */}
+                      <div className="dkmv-token-actions">
+                        <button
+                          type="button"
+                          onClick={handleOpenTokenPage}
+                          className="dkmv-link-btn"
+                          style={{
+                            padding: "7px 16px",
+                            fontSize: 11,
+                            borderRadius: 999,
+                            border: "1px solid rgba(148,163,184,0.9)",
+                            backgroundColor: "#020617",
+                            color: "#e5e7eb",
+                            cursor: "pointer",
+                            fontWeight: 500,
+                            whiteSpace: "nowrap",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <ExternalLink size={13} />
+                          <span>웹으로 가기</span>
+                        </button>
+                      </div>
+
+                      {/* 토큰 입력 + 확인 버튼 */}
+                      <div className="dkmv-token-input-wrap">
+                        <div className="dkmv-token-input-row">
+                          <input
+                            className="dkmv-token-input"
+                            placeholder="DKMV 웹에서 발급한 VS Code 토큰을 붙여넣어 주세요."
+                            value={tokenInput}
+                            onChange={(e) => setTokenInput(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSubmitToken}
+                            disabled={isSettingToken}
+                            className="dkmv-token-btn"
+                            style={{
+                              padding: "8px 18px",
+                              fontSize: 12,
+                              borderRadius: 10,
+                              border: "1px solid rgba(129,140,248,0.95)",
+                              background:
+                                "linear-gradient(90deg,rgba(79,70,229,1),rgba(129,140,248,1))",
+                              color: "#f9fafb",
+                              cursor: isSettingToken ? "default" : "pointer",
+                              opacity: isSettingToken ? 0.78 : 1,
+                              fontWeight: 600,
+                              whiteSpace: "nowrap",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <Key size={15} />
+                            <span>
+                              {isSettingToken ? "토큰 확인 중..." : "확인"}
+                            </span>
+                          </button>
+                        </div>
+
+                        {tokenError && (
+                          <div className="dkmv-token-error">{tokenError}</div>
+                        )}
+                      </div>
+
+                      {/* 하단 보안 메시지 */}
+                      <div className="dkmv-token-foot">
+                        <Shield size={11} />
+                        <span>토큰은 이 VS Code 환경에만 저장됩니다.</span>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
+            )}
 
-              <button
-                onClick={handleAnalyze}
-                style={{
-                  padding: "6px 14px",
-                  fontSize: 12,
-                  borderRadius: 8,
-                  border: "1px solid rgba(129,140,248,0.9)",
-                  background:
-                    "linear-gradient(90deg,rgba(129,140,248,1),rgba(168,85,247,0.95))",
-                  color: "#020617",
-                  cursor: isLoading ? "default" : "pointer",
-                  opacity: isLoading ? 0.85 : 1,
-                  fontWeight: 500,
-                  whiteSpace: "nowrap",
+            {/* 코드 탭 */}
+            {activeTab === "code" && (
+              <CodePanel
+                code={code}
+                onChangeCode={handleCodeChange}
+                onCodeKeyDown={handleCodeKeyDown}
+                mode={mode}
+                filePath={filePath}
+                codeHighlight={codeHighlight}
+                selectedModel={selectedModel}
+                onChangeModel={(id) => {
+                  setSelectedModel(id);
+                  setModelError(false);
+                  setIsError(false);
                 }}
-                disabled={isLoading}
-              >
-                {isLoading ? "분석 중..." : "분석 (Ctrl+Enter)"}
-              </button>
-            </div>
+                modelError={modelError}
+                onAnalyze={handleAnalyze}
+                isLoading={isLoading}
+              />
+            )}
 
-            {/* 상태 메시지 바 */}
-            <div
-              style={{
-                marginTop: 6,
-                marginBottom: 4,
-                fontSize: 11,
-                minHeight: 20,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-                padding: "0 10px",
-                color: statusColor,
-              }}
-            >
-              <span style={{ fontWeight: 500 }}>{resultMessage}</span>
-              {selectedModel && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: "#e5e7eb",
-                    opacity: 0.9,
-                  }}
-                >
-                  사용 모델: {selectedModel}
-                </span>
-              )}
-            </div>
-
-            {/* 탭 콘텐츠 */}
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                marginTop: 2,
-              }}
-            >
-              {activeTab === "code" && (
-                <CodePanel
-                  code={code}
-                  onChangeCode={handleCodeChange}
-                  onCodeKeyDown={handleCodeKeyDown}
-                  mode={mode}
-                  filePath={filePath}
-                  codeHighlight={codeHighlight}
-                  selectedModel={selectedModel}
-                  onChangeModel={(id) => {
-                    setSelectedModel(id);
-                    setModelError(false);
-                    setIsError(false);
-                  }}
-                  modelError={modelError}
-                />
-              )}
-
-              {activeTab === "result" && (
-                <ResultPanel
-                  resultData={resultData}
-                  isError={isError}
-                  isLoading={isLoading}
-                  resultHighlight={resultHighlight}
-                  displayOverallScore={displayOverallScore}
-                  displayCategoryScores={displayCategoryScores}
-                  logoSrc={logoSrc}
-                />
-              )}
-            </div>
-          </>
-        )}
+            {/* 결과 탭 */}
+            {activeTab === "result" && (
+              <ResultPanel
+                resultData={resultData}
+                isError={isError}
+                isLoading={isLoading}
+                resultHighlight={resultHighlight}
+                displayOverallScore={displayOverallScore}
+                displayCategoryScores={displayCategoryScores}
+                logoSrc={logoSrc}
+                reviewMeta={reviewMeta ?? undefined}
+                rawResponseText={rawResponseText}
+              />
+            )}
+          </div>
+        </div>
       </div>
     </>
   );

@@ -2,214 +2,232 @@
 
 import type {
   AnalyzerResult,
-  IssueSeverity,
-  ReviewIssue,
   ScoreCategories,
-  EMPTY_CATEGORIES,
+  ReviewIssue,
+  IssueSeverity,
   CategoryComment,
 } from "../types";
+
+import type React from "react";
 import { Bug, Wrench, Palette, Shield } from "lucide-react";
 
-export const clampScore = (s: any): number => {
-  if (s == null) return 0;
-
-  if (typeof s === "object") {
-    const cand =
-      (s as any).score ??
-      (s as any).value ??
-      (s as any).points ??
-      (s as any).total ??
-      (s as any).avg ??
-      Object.values(s)[0];
-    s = cand;
+/**
+ * 0~100 범위로 점수 고정
+ */
+export function clampScore(value: any): number {
+  if (typeof value !== "number") {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 0;
+    value = n;
   }
+  if (Number.isNaN(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 100) return 100;
+  return Math.round(value);
+}
 
-  if (typeof s !== "number") {
-    const parsed = Number(s);
-    if (Number.isNaN(parsed)) return 0;
-    s = parsed;
-  }
-  if (s >= 0 && s <= 1) s = s * 100;
-  if (s < 0) s = 0;
-  if (s > 100) s = 100;
-  return Math.round(s);
-};
+/**
+ * resultData에서 카테고리별 점수 추출
+ * - 우선 순위: result.scores_by_category → result.body.scores_by_category
+ * - 없으면 0으로 채움
+ */
+export function extractScoresByCategory(
+  result: AnalyzerResult | null
+): ScoreCategories {
+  const base: ScoreCategories = {
+    bug: 0,
+    maintainability: 0,
+    style: 0,
+    security: 0,
+  };
 
-export const extractScoresByCategory = (
-  data: AnalyzerResult | null
-): ScoreCategories => {
-  if (!data) return EMPTY_CATEGORIES;
+  if (!result) return base;
+
+  const root: any = result as any;
 
   const src =
-    (data as any).scores_by_category ??
-    (data as any).scoresByCategory ??
-    (data as any).category_scores ??
-    {};
-
-  const get = (obj: any, ...keys: string[]) => {
-    for (const k of keys) {
-      if (obj && obj[k] != null) return obj[k];
-    }
-    return 0;
-  };
-
-  return {
-    bug: clampScore(get(src, "bug", "Bug", "BUG", "bug_score")),
-    maintainability: clampScore(
-      get(
-        src,
-        "maintainability",
-        "Maintainability",
-        "MAINTAINABILITY",
-        "maintainability_score"
-      )
-    ),
-    style: clampScore(get(src, "style", "Style", "STYLE", "style_score")),
-    security: clampScore(
-      get(src, "security", "Security", "SECURITY", "security_score")
-    ),
-  };
-};
-
-export const getScoreLabel = (
-  score: number
-): { label: string; color: string } => {
-  if (score >= 90) return { label: "Excellent", color: "#a3e635" };
-  if (score >= 70) return { label: "Good", color: "#4ade80" };
-  if (score >= 40) return { label: "Okay", color: "#fbbf24" };
-  if (score > 0) return { label: "Needs Work", color: "#f97373" };
-  return { label: "—", color: "#6b7280" };
-};
-
-export const getSeverityStyle = (severityRaw: IssueSeverity) => {
-  const severity = (severityRaw || "").toString().toUpperCase();
-  if (severity === "HIGH") {
-    return {
-      label: "HIGH",
-      bg: "rgba(127,29,29,0.5)",
-      border: "rgba(248,113,113,0.9)",
-      color: "#fecaca",
-    };
-  }
-  if (severity === "MEDIUM") {
-    return {
-      label: "MEDIUM",
-      bg: "rgba(120,53,15,0.5)",
-      border: "rgba(251,191,36,0.9)",
-      color: "#facc15",
-    };
-  }
-  if (severity === "LOW") {
-    return {
-      label: "LOW",
-      bg: "rgba(22,101,52,0.45)",
-      border: "rgba(52,211,153,0.9)",
-      color: "#6ee7b7",
-    };
-  }
-  return {
-    label: severity || "N/A",
-    bg: "rgba(30,64,175,0.4)",
-    border: "rgba(129,140,248,0.9)",
-    color: "#e5e7eb",
-  };
-};
-
-export const normalizeReviewDetails = (
-  resultData: AnalyzerResult | null
-): { categoryComments: CategoryComment[]; issueDetails: ReviewIssue[] } => {
-  if (!resultData) return { categoryComments: [], issueDetails: [] };
-
-  const raw =
-    (resultData as any).review_details ??
-    (resultData as any).reviewDetails ??
-    (resultData as any).issues ??
+    root.scores_by_category ||
+    root.body?.scores_by_category ||
+    root.review_details?.scores_by_category ||
     null;
 
-  const comments: CategoryComment[] = [];
-  const issues: ReviewIssue[] = [];
+  if (!src || typeof src !== "object") {
+    return base;
+  }
 
-  const mapping: {
+  const out: ScoreCategories = { ...base };
+
+  (Object.keys(base) as (keyof ScoreCategories)[]).forEach((k) => {
+    const raw = (src as any)[k];
+    if (raw == null) return;
+
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return;
+
+    out[k] = clampScore(n);
+  });
+
+  return out;
+}
+
+/**
+ * 전체 점수를 위한 레이블 & 색상
+ */
+export function getScoreLabel(score: number): { label: string; color: string } {
+  const v = clampScore(score);
+
+  if (v >= 90) {
+    return { label: "Excellent", color: "#22c55e" }; // green-500
+  }
+  if (v >= 75) {
+    return { label: "Good", color: "#a3e635" }; // lime-400
+  }
+  if (v >= 60) {
+    return { label: "Fair", color: "#facc15" }; // yellow-400
+  }
+  if (v >= 40) {
+    return { label: "Needs Work", color: "#fb923c" }; // orange-400
+  }
+  return { label: "Poor", color: "#f87171" }; // red-400/500
+}
+
+/**
+ * 이슈 severity 별 스타일
+ */
+export function getSeverityStyle(severity: IssueSeverity | string | undefined) {
+  const s = (severity ?? "").toString().toUpperCase();
+
+  if (s === "HIGH" || s === "ERROR" || s === "CRITICAL") {
+    return {
+      label: "HIGH",
+      bg: "rgba(239,68,68,0.12)",
+      color: "#fca5a5",
+      border: "1px solid rgba(248,113,113,0.7)",
+    };
+  }
+
+  if (s === "MEDIUM" || s === "WARN" || s === "WARNING") {
+    return {
+      label: "MEDIUM",
+      bg: "rgba(245,158,11,0.08)",
+      color: "#fbbf24",
+      border: "1px solid rgba(251,191,36,0.7)",
+    };
+  }
+
+  if (s === "LOW" || s === "INFO") {
+    return {
+      label: "LOW",
+      bg: "rgba(56,189,248,0.08)",
+      color: "#7dd3fc",
+      border: "1px solid rgba(125,211,252,0.6)",
+    };
+  }
+
+  // fallback
+  return {
+    label: s || "INFO",
+    bg: "rgba(148,163,184,0.08)",
+    color: "#cbd5f5",
+    border: "1px solid rgba(148,163,184,0.6)",
+  };
+}
+
+/**
+ * Playground에서 사용하는 /v1/reviews/{id} 응답을
+ * VS Code ResultPanel에서 쓰기 좋게 변환
+ *
+ * - categoryComments: comments[bug | maintainability | style | security]
+ * - issueDetails: review_details.issues / issues 등 (있으면)
+ */
+export function normalizeReviewDetails(result: AnalyzerResult | null): {
+  categoryComments: CategoryComment[];
+  issueDetails: ReviewIssue[];
+} {
+  if (!result) {
+    return {
+      categoryComments: [],
+      issueDetails: [],
+    };
+  }
+
+  const root: any = result as any;
+
+  // 1) 카테고리별 코멘트: comments
+  const commentsObj: Record<string, string> | null =
+    root.comments ||
+    root.body?.comments ||
+    root.review_details?.comments ||
+    null;
+
+  const baseCategories: {
     key: CategoryComment["key"];
     label: string;
     icon: CategoryComment["icon"];
   }[] = [
-    { key: "bug", label: "Bug", icon: Bug },
-    { key: "maintainability", label: "Maintainability", icon: Wrench },
-    { key: "style", label: "Style", icon: Palette },
-    { key: "security", label: "Security", icon: Shield },
+    { key: "bug", label: "Bug", icon: Bug as unknown as React.ComponentType },
+    {
+      key: "maintainability",
+      label: "Maintainability",
+      icon: Wrench as unknown as React.ComponentType,
+    },
+    {
+      key: "style",
+      label: "Style",
+      icon: Palette as unknown as React.ComponentType,
+    },
+    {
+      key: "security",
+      label: "Security",
+      icon: Shield as unknown as React.ComponentType,
+    },
   ];
 
-  // 1) 타입별 코멘트 (object)
-  if (raw && !Array.isArray(raw) && typeof raw === "object") {
-    for (const m of mapping) {
-      const text =
-        (raw as any)[m.key] ??
-        (raw as any)[m.key.toUpperCase()] ??
-        (raw as any)[m.key.charAt(0).toUpperCase() + m.key.slice(1)];
-      if (typeof text === "string" && text.trim().length > 0) {
-        comments.push({
-          key: m.key,
-          label: m.label,
-          icon: m.icon,
-          text: text.trim(),
-        });
-      }
-    }
-  }
+  const categoryComments: CategoryComment[] = baseCategories.map((c) => ({
+    key: c.key,
+    label: c.label,
+    icon: c.icon,
+    text: commentsObj?.[c.key] ?? "",
+  }));
 
-  // 2) 개별 이슈 배열
-  let rawArray: any[] = [];
-  if (Array.isArray(raw)) {
-    rawArray = raw;
-  } else {
-    const alt =
-      (resultData as any).issues_list ?? (resultData as any).issues ?? null;
-    if (Array.isArray(alt)) rawArray = alt;
-  }
+  // 2) 이슈 리스트: 가능한 여러 케이스를 한 번에 커버
+  const rawIssues: any =
+    root.review_details?.issues ||
+    root.review_details?.issues_by_category ||
+    root.review_details ||
+    root.issues ||
+    root.body?.review_details?.issues ||
+    [];
 
-  if (rawArray.length > 0) {
-    rawArray.forEach((item: any, idx: number) => {
-      const issue_id =
-        item.issue_id ?? item.id ?? item.code ?? `ISSUE_${idx + 1}`;
+  const issueDetails: ReviewIssue[] = Array.isArray(rawIssues)
+    ? rawIssues.map((it: any, idx: number) => ({
+        issue_id:
+          it.issue_id ??
+          it.id ??
+          `issue_${idx + 1}_${String(it.issue_category || "")}`,
+        issue_category: it.issue_category ?? it.category ?? "general",
+        issue_severity: (it.issue_severity ??
+          it.severity ??
+          "INFO") as IssueSeverity,
+        issue_summary: it.issue_summary ?? it.summary ?? "",
+        issue_details: it.issue_details ?? it.details ?? it.message ?? "",
+        issue_line_number:
+          typeof it.issue_line_number === "number"
+            ? it.issue_line_number
+            : typeof it.line === "number"
+            ? it.line
+            : undefined,
+        issue_column_number:
+          typeof it.issue_column_number === "number"
+            ? it.issue_column_number
+            : typeof it.column === "number"
+            ? it.column
+            : undefined,
+      }))
+    : [];
 
-      const issue_category =
-        item.issue_category ?? item.category ?? item.type ?? "unknown_category";
-
-      const issue_severity = (item.issue_severity ??
-        item.severity ??
-        "N/A") as IssueSeverity;
-
-      const issue_summary =
-        item.issue_summary ??
-        item.summary ??
-        item.message ??
-        item.title ??
-        "(요약 없음)";
-
-      const issue_details =
-        item.issue_details ?? item.details ?? item.description ?? undefined;
-
-      const issue_line_number =
-        item.issue_line_number ?? item.line_number ?? item.line ?? undefined;
-
-      const issue_column_number =
-        item.issue_column_number ??
-        item.column_number ??
-        item.column ??
-        undefined;
-
-      issues.push({
-        issue_id,
-        issue_category,
-        issue_severity,
-        issue_summary,
-        issue_details,
-        issue_line_number,
-        issue_column_number,
-      });
-    });
-  }
-
-  return { categoryComments: comments, issueDetails: issues };
-};
+  return {
+    categoryComments,
+    issueDetails,
+  };
+}

@@ -1,13 +1,14 @@
 // src/extension.ts
 import * as vscode from "vscode";
 
-// 🔗 서버 엔드포인트 분리
-// - AUTH_API_BASE: 인증/유저 정보 (FastAPI 8000)
-// - REVIEW_API_BASE: 리뷰/LLM (8002)
-const AUTH_API_BASE = "http://18.205.229.159:8000";
-const REVIEW_API_BASE = "http://18.205.229.159:8002";
+// 🔗 서버 엔드포인트
+// 지금은 auth / reviews 둘 다 8000 에서 제공된다고 가정
+const API_BASE = "http://18.205.229.159:8000";
 
-// ✅ 새 리뷰 생성 & 조회 엔드포인트 (LLM 서버)
+const AUTH_API_BASE = API_BASE;
+const REVIEW_API_BASE = API_BASE;
+
+// ✅ 새 리뷰 생성 & 조회 엔드포인트
 const REVIEW_REQUEST_URL = `${REVIEW_API_BASE}/v1/reviews/request`;
 const REVIEW_GET_URL = `${REVIEW_API_BASE}/v1/reviews`;
 
@@ -45,32 +46,30 @@ type WebviewMessage =
   | { type: "OPEN_LOGIN" }
   | { type: "OPEN_TOKEN_PAGE" }
   | { type: "SET_TOKEN"; payload?: { token?: string } }
+  | { type: "LOGOUT" }
   | { type: string; payload?: any };
 
-// ReviewRequest 스펙 참고용 타입
+// ⚙️ /v1/reviews/request 스펙에 맞춘 타입
 type ReviewRequestPayload = {
   meta: {
-    user_id: number | null;
+    github_id: string | null;
     review_id: number | null;
-    version: string;
+    version: "v1";
     actor: string;
+    language: string;
+    trigger: "manual" | "auto";
     code_fingerprint: string | null;
     model: string | null;
     result: {
       result_ref: string | null;
       error_message: string | null;
-    };
-    audit: {
-      created_at: string;
-      updated_at: string;
-    };
+    } | null;
+    audit: string; // ISO 문자열
   };
   body: {
     snippet: {
       code: string;
-      language: string;
     };
-    trigger: "manual" | "auto";
   };
 };
 
@@ -183,7 +182,7 @@ async function setAuthToken(
   options?: { silent?: boolean }
 ) {
   try {
-    // ✅ 여기! 유저 검증은 AUTH_API_BASE (8000)로 보냄
+    // ✅ 유저 검증은 AUTH_API_BASE (8000)로 전송
     const res = await fetch(`${AUTH_API_BASE}/v1/users/me`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -259,6 +258,8 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
+      // 🔒 웹뷰에서 접근할 수 있는 로컬 리소스 루트
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")],
     }
   );
 
@@ -288,14 +289,12 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
           break;
 
         case "OPEN_LOGIN":
-          // 🔓 브라우저로 로그인 페이지 열기 (기존 플로우 유지하고 싶으면 사용)
           vscode.env.openExternal(
             vscode.Uri.parse(`${FRONTEND_URL}/login?from=extension`)
           );
           break;
 
         case "OPEN_TOKEN_PAGE":
-          // 🔓 VS Code용 토큰 발급 페이지 열기
           vscode.env.openExternal(vscode.Uri.parse(`${FRONTEND_URL}`));
           break;
 
@@ -309,6 +308,20 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
             return;
           }
           await setAuthToken(token, context);
+          break;
+        }
+
+        case "LOGOUT": {
+          authToken = null;
+          authUser = null;
+          await context.globalState.update("dkmv.authToken", undefined);
+          panel?.webview.postMessage({
+            type: "AUTH_STATE",
+            payload: {
+              isAuthenticated: false,
+              user: null,
+            },
+          });
           break;
         }
 
@@ -367,7 +380,6 @@ async function handleRequestFullDocument() {
  * 코드 분석 요청:
  *  1) POST /v1/reviews/request   → 리뷰 생성 + review_id 받기
  *  2) GET  /v1/reviews/{id}      → 실제 리뷰 결과 조회
- * 각 단계마다 ANALYZE_PROGRESS로 단계 표시
  */
 async function handleRequestAnalyze(payload: {
   code?: string;
@@ -398,49 +410,42 @@ async function handleRequestAnalyze(payload: {
   }
 
   const filePathForReq = payload.filePath ?? fallbackFilePath;
-  const languageForReq =
-    payload.languageId ?? (fallbackLanguageId || "plaintext");
-  const modelForReq = payload.model ?? "qwen2.5-coder-7b";
+  const languageForReq = payload.languageId ?? (fallbackLanguageId || "python");
+  const modelForReq = payload.model ?? "openai/gpt-5.1";
 
   try {
-    // 1/6: LLM 요청 준비
+    // 1) LLM 요청 준비
     panel?.webview.postMessage({
       type: "ANALYZE_PROGRESS",
-      payload: "1/6 • LLM 리뷰 요청을 준비 중입니다...",
+      payload: "1/3 • 리뷰 생성 요청을 준비 중입니다...",
     });
 
     const nowIso = new Date().toISOString();
 
     const body: ReviewRequestPayload = {
       meta: {
-        user_id: authUser?.id ?? null,
+        github_id: authUser?.github_id ?? null,
         review_id: null,
         version: "v1",
         actor: "vscode-extension",
+        language: languageForReq,
+        trigger: "manual",
         code_fingerprint: null,
         model: modelForReq,
-        result: {
-          result_ref: null,
-          error_message: null,
-        },
-        audit: {
-          created_at: nowIso,
-          updated_at: nowIso,
-        },
+        result: null,
+        audit: nowIso,
       },
       body: {
         snippet: {
           code: codeSnippet,
-          language: languageForReq,
         },
-        trigger: "manual",
       },
     };
 
-    // 2/6: POST /v1/reviews/request
+    // 2) POST /v1/reviews/request
     panel?.webview.postMessage({
       type: "ANALYZE_PROGRESS",
-      payload: "2/6 • LLM 서버로 리뷰 요청을 전송 중입니다...",
+      payload: "2/3 • LLM 서버로 리뷰 생성 요청을 전송 중입니다...",
     });
 
     const postResp = await fetch(REVIEW_REQUEST_URL, {
@@ -462,34 +467,22 @@ async function handleRequestAnalyze(payload: {
 
     try {
       postJson = JSON.parse(postText);
-      reviewId = postJson?.body?.review_id ?? null;
+      reviewId = postJson?.body?.review_id ?? postJson?.review_id ?? null;
     } catch {
-      // JSON 파싱 실패 시 그대로 넘어감
+      // JSON 파싱 실패 시 아래에서 에러 처리
     }
 
     if (reviewId == null) {
       throw new Error("리뷰 생성 응답에서 review_id를 찾을 수 없습니다.");
     }
 
-    // 3/6: LLM 요청 성공
     panel!.webview.postMessage({
       type: "ANALYZE_PROGRESS",
-      payload: `3/6 • LLM 리뷰 요청 성공 (review_id: ${reviewId}). LLM 응답을 기다리는 중입니다...`,
+      payload: `2/3 • 리뷰 생성 완료 (review_id: ${reviewId}). 결과를 조회합니다...`,
     });
 
-    // 4/6: 결과 조회 준비
-    panel!.webview.postMessage({
-      type: "ANALYZE_PROGRESS",
-      payload: "4/6 • 서버에 저장된 리뷰 결과를 가져올 준비를 하고 있습니다...",
-    });
-
-    // 5/6: GET /v1/reviews/{review_id}
+    // 3) GET /v1/reviews/{review_id}
     const getUrl = `${REVIEW_GET_URL}/${reviewId}`;
-    panel!.webview.postMessage({
-      type: "ANALYZE_PROGRESS",
-      payload: "5/6 • 서버에서 리뷰 결과를 가져오는 중입니다...",
-    });
-
     const getResp = await fetch(getUrl, {
       method: "GET",
       headers: {
@@ -512,10 +505,9 @@ async function handleRequestAnalyze(payload: {
 
     const analyzerResult = extractAnalyzerResultFromResponse(getJson);
 
-    // 6/6: 최종 성공
     panel!.webview.postMessage({
       type: "ANALYZE_PROGRESS",
-      payload: "6/6 • 리뷰 결과 수신 완료! 분석 내용을 표시합니다.",
+      payload: "3/3 • 리뷰 결과 수신 완료! 분석 내용을 표시합니다.",
     });
 
     panel!.webview.postMessage({
@@ -587,35 +579,71 @@ function getWebviewHtml(
     vscode.Uri.joinPath(extensionUri, "media", "logo.png")
   );
 
+  // ✅ ResultPanel에서 사용하는 이미지들
+  const notFoundUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "media", "not_found.png")
+  );
+
+  const badgeExcellentUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "media", "Excellent.png")
+  );
+  const badgeGoodUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "media", "Good.png")
+  );
+  const badgeFairUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "media", "Fair.png")
+  );
+  const badgeNeedsWorkUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "media", "NeedsWork.png")
+  );
+  const badgePoorUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "media", "Poor.png")
+  );
+
   const nonce = getNonce();
 
-  return /* html */ `
-    <!DOCTYPE html>
-    <html lang="ko">
-      <head>
-        <meta charset="UTF-8" />
-        <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; img-src ${webview.cspSource} https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>DKMV Analyzer</title>
-      </head>
-      <body>
-        <div id="root"></div>
+  return /* html */ `<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src ${webview.cspSource} https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' https:; font-src https:;" />
+    
+    <!-- 🔤 Gowun Dodum 폰트 로딩 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap"
+      rel="stylesheet"
+    />
 
-        <script nonce="${nonce}">
-          (function () {
-            if (typeof window.process === "undefined") {
-              // @ts-ignore
-              window.process = { env: { NODE_ENV: "production" } };
-            }
-            window.__DKMV_LOGO__ = "${logoUri}";
-          })();
-        </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DKMV Analyzer</title>
+  </head>
+  <body>
+    <div id="root"></div>
 
-        <script nonce="${nonce}" src="${scriptUri}"></script>
-      </body>
-    </html>
-  `;
+    <script nonce="${nonce}">
+      (function () {
+        if (typeof window.process === "undefined") {
+          // @ts-ignore
+          window.process = { env: { NODE_ENV: "production" } };
+        }
+        window.__DKMV_LOGO__ = "${logoUri}";
+        window.__DKMV_NOT_FOUND__ = "${notFoundUri}";
+        window.__DKMV_BADGES__ = {
+          excellent: "${badgeExcellentUri}",
+          good: "${badgeGoodUri}",
+          fair: "${badgeFairUri}",
+          needsWork: "${badgeNeedsWorkUri}",
+          poor: "${badgePoorUri}"
+        };
+      })();
+    </script>
+
+    <script nonce="${nonce}" src="${scriptUri}"></script>
+  </body>
+</html>`;
 }
 
 function getNonce() {

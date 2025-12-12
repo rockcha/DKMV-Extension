@@ -42,11 +42,18 @@ export type ReviewIssue = {
   issue_column_number?: number;
 };
 
+/**
+ * VS Code 쪽에서 사용하는 분석 결과 타입
+ * - Playground의 ReviewBody(quality_score, summary, scores_by_category, comments)와 호환되게 정의
+ */
 export type AnalyzerResult = {
   quality_score: number;
-  review_summary?: string;
+  review_summary?: string; // 예전 필드
+  summary?: string; // Playground /v1/reviews/{id} body.summary
   scores_by_category?: Partial<ScoreCategories>;
   review_details?: any;
+
+  comments?: Record<string, string>; // bug, maintainability, style, security ...
   [key: string]: any;
 };
 
@@ -62,4 +69,35 @@ export type CategoryComment = {
     strokeWidth?: number;
   }>;
   text: string;
+};
+
+/* Playground / FastAPI /v1/reviews/{id} 와 동일한 구조를 쓰기 위한 타입 */
+export type ReviewMeta = {
+  github_id?: string | null;
+  review_id?: number | null;
+  version?: string;
+  actor?: string;
+  language?: string;
+  trigger?: string;
+  code_fingerprint?: string | null;
+  model?: string | null;
+  result?: {
+    result_ref?: string | null;
+    error_message?: string | null;
+  } | null;
+  audit?: string | null;
+  status?: string;
+  [key: string]: any;
+};
+
+export type ReviewBody = {
+  quality_score: number;
+  summary: string;
+  scores_by_category: Partial<ScoreCategories>;
+  comments: Record<string, string>;
+};
+
+export type ReviewDetailResponse = {
+  meta: ReviewMeta;
+  body: ReviewBody;
 };

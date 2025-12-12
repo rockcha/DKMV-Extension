@@ -1,5 +1,3 @@
-// src/webview/components/CodePanel.tsx
-
 import React from "react";
 import ModelSelector from "./ModelSelector";
 
@@ -15,6 +13,8 @@ type Props = {
   selectedModel: string;
   onChangeModel: (id: string) => void;
   modelError: boolean;
+  onAnalyze: () => void;
+  isLoading: boolean;
 };
 
 const CodePanel: React.FC<Props> = ({
@@ -27,6 +27,8 @@ const CodePanel: React.FC<Props> = ({
   selectedModel,
   onChangeModel,
   modelError,
+  onAnalyze,
+  isLoading,
 }) => {
   const fileName = filePath ? filePath.split(/[\\/]/).slice(-1)[0] : "";
   const lineCount = code ? code.split(/\r\n|\r|\n/).length : 0;
@@ -42,7 +44,7 @@ const CodePanel: React.FC<Props> = ({
         background:
           "radial-gradient(circle at top, rgba(37,99,235,0.18), transparent 60%), #020617",
         padding: 10,
-        minHeight: "calc(100vh - 160px)",
+        minHeight: "calc(100vh - 190px)",
         boxSizing: "border-box",
       }}
     >
@@ -94,7 +96,7 @@ const CodePanel: React.FC<Props> = ({
           )}
         </div>
 
-        {/* 👉 모델 검색/선택 UI (입력 코드 탭 내부) */}
+        {/* 👉 모델 검색/선택 UI */}
         <ModelSelector
           value={selectedModel}
           onChange={onChangeModel}
@@ -125,19 +127,50 @@ const CodePanel: React.FC<Props> = ({
           color: "#e5e7eb",
           outline: "none",
           transition: "border-color 0.18s ease-out",
-          minHeight: "260px",
+          minHeight: "220px", // 🔽 조금 줄임
         }}
       />
 
+      {/* 하단: 줄/문자 정보(왼쪽) + 분석 버튼(오른쪽) */}
       <div
         style={{
-          marginTop: 4,
-          textAlign: "right",
+          marginTop: 6,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
           fontSize: 10,
           color: "#6b7280",
         }}
       >
-        {lineCount} lines · {charCount} chars
+        <span>
+          {lineCount} lines · {charCount} chars
+        </span>
+
+        <button
+          onClick={onAnalyze}
+          className="dkmv-analyze-btn"
+          style={{
+            padding: "7px 18px",
+            fontSize: 12,
+            borderRadius: 10,
+            border: "1px solid rgba(129,140,248,0.95)",
+            background:
+              "linear-gradient(90deg,rgba(79,70,229,1),rgba(129,140,248,1))",
+            color: "#f9fafb",
+            cursor: isLoading ? "default" : "pointer",
+            opacity: isLoading ? 0.85 : 1,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            letterSpacing: 0.1,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+          disabled={isLoading}
+        >
+          <span>{isLoading ? "분석 중..." : "분석 (Ctrl+Enter)"}</span>
+        </button>
       </div>
     </section>
   );

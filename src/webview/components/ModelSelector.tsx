@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { MODEL_OPTIONS } from "../modelOptions";
+import { Bot, Search } from "lucide-react";
 
 type Props = {
   value: string;
@@ -17,11 +18,19 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
     if (!q) return MODEL_OPTIONS;
     return MODEL_OPTIONS.filter(
       (m) =>
-        m.id.toLowerCase().includes(q) || m.provider.toLowerCase().includes(q)
+        m.id.toLowerCase().includes(q) ||
+        m.provider.toLowerCase().includes(q) ||
+        m.label.toLowerCase().includes(q)
     );
   }, [query]);
 
-  const current = filtered.find((m) => m.id === value) ?? null;
+  const borderColor = hasError
+    ? "1px solid rgba(248,113,113,0.9)"
+    : "1px solid rgba(55,65,81,0.9)";
+
+  const inputBorderColor = hasError
+    ? "1px solid rgba(248,113,113,0.9)"
+    : "1px solid rgba(55,65,81,0.9)";
 
   return (
     <div
@@ -34,7 +43,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
         minWidth: 0,
       }}
     >
-      {/* 라벨 + 검색 인풋 + 버튼 한 줄 */}
+      {/* 라벨 + 검색 인풋 한 줄 */}
       <div
         style={{
           display: "flex",
@@ -46,12 +55,16 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
         <span
           style={{
             fontSize: 11,
-            color: "#e5e7eb",
-            opacity: 0.9,
+            color: hasError ? "#fecaca" : "#e5e7eb",
+            opacity: 0.95,
             whiteSpace: "nowrap",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
           }}
         >
-          사용한 AI Agent
+          <Bot size={13} />
+          <span>내가 사용한 AI Agent</span>
         </span>
 
         <div
@@ -63,24 +76,41 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
             minWidth: 0,
           }}
         >
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="모델 ID / provider 검색"
+          <div
             style={{
-              flex: 1,
-              fontSize: 12,
-              padding: "6px 10px",
-              borderRadius: 999,
-              border: hasError
-                ? "1px solid rgba(248,113,113,0.9)"
-                : "1px solid rgba(55,65,81,0.9)",
-              backgroundColor: "rgba(15,23,42,0.95)",
-              color: "#e5e7eb",
-              outline: "none",
+              position: "relative",
+              width: "100%",
               minWidth: 0,
             }}
-          />
+          >
+            <Search
+              size={12}
+              style={{
+                position: "absolute",
+                left: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                opacity: 0.7,
+                pointerEvents: "none",
+              }}
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="모델 ID / provider 검색"
+              style={{
+                width: "100%",
+                fontSize: 12,
+                padding: "6px 10px 6px 24px",
+                borderRadius: 999,
+                border: inputBorderColor,
+                backgroundColor: "rgba(15,23,42,0.95)",
+                color: "#e5e7eb",
+                outline: "none",
+                minWidth: 0,
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -88,9 +118,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
       <div
         style={{
           borderRadius: 10,
-          border: hasError
-            ? "1px solid rgba(248,113,113,0.9)"
-            : "1px solid rgba(55,65,81,0.9)",
+          border: borderColor,
           backgroundColor: "rgba(15,23,42,0.98)",
           maxHeight: 180,
           minHeight: 120,
@@ -103,12 +131,37 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
         {filtered.length === 0 ? (
           <div
             style={{
-              fontSize: 11,
-              color: "#9ca3af",
-              padding: "4px 6px",
+              width: "100%",
+              height: "100%",
+              minHeight: 112,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              padding: 8,
+              boxSizing: "border-box",
             }}
           >
-            검색 결과가 없습니다.
+            <img
+              src="/public/not_found.png"
+              alt="모델을 찾을 수 없습니다."
+              style={{
+                width: 72,
+                height: 72,
+                objectFit: "contain",
+                opacity: 0.95,
+              }}
+            />
+            <span
+              style={{
+                fontSize: 11,
+                color: "#9ca3af",
+                textAlign: "center",
+              }}
+            >
+              검색 결과가 없습니다.
+            </span>
           </div>
         ) : (
           filtered.map((m) => {
@@ -150,6 +203,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
                   style={{
                     fontSize: 10,
                     color: active ? "#ede9fe" : "#9ca3af",
+                    whiteSpace: "nowrap",
                   }}
                 >
                   [{m.provider}]
