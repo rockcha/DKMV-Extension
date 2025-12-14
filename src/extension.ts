@@ -2,7 +2,6 @@
 import * as vscode from "vscode";
 
 // 🔗 서버 엔드포인트
-// 지금은 auth / reviews 둘 다 8000 에서 제공된다고 가정
 const API_BASE = "http://18.205.229.159:8000";
 
 const AUTH_API_BASE = API_BASE;
@@ -12,6 +11,9 @@ const REVIEW_API_BASE = API_BASE;
 const REVIEW_REQUEST_URL = `${REVIEW_API_BASE}/v1/reviews/request`;
 const REVIEW_GET_URL = `${REVIEW_API_BASE}/v1/reviews`;
 
+// ✅ 개선코드 생성 엔드포인트 (웹 Playgound의 /api/v1/fix → 서버는 /v1/fix)
+const FIX_URL = `${API_BASE}/v1/fix`;
+
 // 🌐 웹 대시보드 주소 (토큰 발급 페이지 열 때 사용)
 const FRONTEND_URL = "https://web-dkmv.vercel.app";
 
@@ -20,6 +22,13 @@ let authToken: string | null = null;
 let authUser: AuthUser | null = null;
 
 let panel: vscode.WebviewPanel | undefined;
+
+// ✅ 개선코드용 캐시(마지막 리뷰/코드)
+let lastReviewId: number | null = null;
+let lastAnalyzerResult: any = null;
+let lastCodeSnippet: string | null = null;
+let lastLanguageId: string | null = null;
+let lastModel: string | null = null;
 
 // 서버가 주는 유저 스펙(웹에서 쓰는 AuthUser와 거의 동일하게 맞춤)
 type AuthUser = {
@@ -40,6 +49,17 @@ type WebviewMessage =
         filePath?: string;
         languageId?: string;
         model?: string;
+      };
+    }
+  | {
+      type: "REQUEST_IMPROVED_CODE";
+      payload?: {
+        code?: string;
+        filePath?: string;
+        languageId?: string;
+        model?: string;
+        reviewId?: number | null;
+        analyzerResult?: any;
       };
     }
   | { type: "GET_AUTH_STATE" }
@@ -126,6 +146,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
       ensureWebviewPanel(context);
 
+      // ✅ 개선코드 캐시(코드/언어)도 최신으로 유지
+      lastCodeSnippet = code;
+      lastLanguageId = languageId;
+
       panel!.webview.postMessage({
         type: "NEW_CODE",
         payload: {
@@ -182,7 +206,6 @@ async function setAuthToken(
   options?: { silent?: boolean }
 ) {
   try {
-    // ✅ 유저 검증은 AUTH_API_BASE (8000)로 전송
     const res = await fetch(`${AUTH_API_BASE}/v1/users/me`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -258,7 +281,6 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
-      // 🔒 웹뷰에서 접근할 수 있는 로컬 리소스 루트
       localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")],
     }
   );
@@ -276,6 +298,10 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
 
         case "REQUEST_ANALYZE":
           await handleRequestAnalyze(message.payload ?? {});
+          break;
+
+        case "REQUEST_IMPROVED_CODE":
+          await handleRequestImprovedCode(message.payload ?? {});
           break;
 
         case "GET_AUTH_STATE":
@@ -315,6 +341,14 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
           authToken = null;
           authUser = null;
           await context.globalState.update("dkmv.authToken", undefined);
+
+          // 캐시도 리셋
+          lastReviewId = null;
+          lastAnalyzerResult = null;
+          lastCodeSnippet = null;
+          lastLanguageId = null;
+          lastModel = null;
+
           panel?.webview.postMessage({
             type: "AUTH_STATE",
             payload: {
@@ -364,6 +398,10 @@ async function handleRequestFullDocument() {
   const fullFilePath = active.document.uri.fsPath;
   const fullLanguageId = active.document.languageId;
 
+  // 캐시도 업데이트
+  lastCodeSnippet = fullCode;
+  lastLanguageId = fullLanguageId;
+
   panel?.webview.postMessage({
     type: "NEW_CODE",
     payload: {
@@ -387,7 +425,6 @@ async function handleRequestAnalyze(payload: {
   languageId?: string;
   model?: string;
 }) {
-  // 🔐 로그인 강제: 토큰 없으면 거절
   if (!authToken || !authUser) {
     panel?.webview.postMessage({
       type: "ANALYZE_ERROR",
@@ -397,7 +434,6 @@ async function handleRequestAnalyze(payload: {
   }
 
   const editor = vscode.window.activeTextEditor;
-  const fallbackFilePath = editor?.document.uri.fsPath ?? "";
   const fallbackLanguageId = editor?.document.languageId ?? "";
 
   const codeSnippet = payload.code ?? "";
@@ -409,12 +445,10 @@ async function handleRequestAnalyze(payload: {
     return;
   }
 
-  const filePathForReq = payload.filePath ?? fallbackFilePath;
   const languageForReq = payload.languageId ?? (fallbackLanguageId || "python");
   const modelForReq = payload.model ?? "openai/gpt-5.1";
 
   try {
-    // 1) LLM 요청 준비
     panel?.webview.postMessage({
       type: "ANALYZE_PROGRESS",
       payload: "1/3 • 리뷰 생성 요청을 준비 중입니다...",
@@ -442,7 +476,6 @@ async function handleRequestAnalyze(payload: {
       },
     };
 
-    // 2) POST /v1/reviews/request
     panel?.webview.postMessage({
       type: "ANALYZE_PROGRESS",
       payload: "2/3 • LLM 서버로 리뷰 생성 요청을 전송 중입니다...",
@@ -481,7 +514,6 @@ async function handleRequestAnalyze(payload: {
       payload: `2/3 • 리뷰 생성 완료 (review_id: ${reviewId}). 결과를 조회합니다...`,
     });
 
-    // 3) GET /v1/reviews/{review_id}
     const getUrl = `${REVIEW_GET_URL}/${reviewId}`;
     const getResp = await fetch(getUrl, {
       method: "GET",
@@ -504,6 +536,13 @@ async function handleRequestAnalyze(payload: {
     }
 
     const analyzerResult = extractAnalyzerResultFromResponse(getJson);
+
+    // ✅ 개선코드용 캐시 저장
+    lastReviewId = reviewId;
+    lastAnalyzerResult = analyzerResult;
+    lastCodeSnippet = codeSnippet;
+    lastLanguageId = languageForReq;
+    lastModel = modelForReq;
 
     panel!.webview.postMessage({
       type: "ANALYZE_PROGRESS",
@@ -534,6 +573,91 @@ async function handleRequestAnalyze(payload: {
     panel?.webview.postMessage({
       type: "ANALYZE_ERROR",
       payload: messageText,
+    });
+  }
+}
+
+/**
+ * ✅ 개선코드 생성 요청:
+ *  - 웹 Playground처럼 POST /v1/fix 에 { review_id, code } 를 전송한다.
+ *  - (중요) /v1/reviews/{id}/improved 같은 “가정 엔드포인트”는 사용하지 않는다. (404 원인)
+ */
+async function handleRequestImprovedCode(payload: {
+  code?: string;
+  reviewId?: number | null;
+}) {
+  if (!authToken || !authUser) {
+    panel?.webview.postMessage({
+      type: "IMPROVED_ERROR",
+      payload: "개선코드를 사용하려면 VS Code 토큰을 먼저 설정해야 합니다.",
+    });
+    return;
+  }
+
+  const code = payload.code ?? lastCodeSnippet ?? "";
+  const reviewId = payload.reviewId ?? lastReviewId ?? null;
+
+  if (!code.trim()) {
+    panel?.webview.postMessage({
+      type: "IMPROVED_ERROR",
+      payload: "개선할 코드가 비어 있습니다.",
+    });
+    return;
+  }
+
+  if (reviewId == null) {
+    panel?.webview.postMessage({
+      type: "IMPROVED_ERROR",
+      payload: "review_id가 없습니다. 먼저 리뷰를 생성하세요.",
+    });
+    return;
+  }
+
+  panel?.webview.postMessage({
+    type: "IMPROVED_PROGRESS",
+    payload: "개선코드 생성 요청 중입니다...",
+  });
+
+  try {
+    const resp = await fetch(`${API_BASE}/v1/fix`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        review_id: reviewId,
+        code,
+      }),
+    });
+
+    const text = await resp.text();
+
+    if (!resp.ok) {
+      throw new Error(`개선코드 생성 실패 (HTTP ${resp.status})\n${text}`);
+    }
+
+    // 서버 응답은 string or JSON → 문자열로 정규화
+    let improvedCode = text;
+    try {
+      const parsed = JSON.parse(text);
+      improvedCode =
+        parsed?.improved_code ?? parsed?.code ?? parsed?.result ?? text;
+    } catch {
+      // plain text면 그대로 사용
+    }
+
+    panel?.webview.postMessage({
+      type: "IMPROVED_RESULT",
+      payload: { improvedCode },
+    });
+  } catch (e) {
+    panel?.webview.postMessage({
+      type: "IMPROVED_ERROR",
+      payload:
+        e instanceof Error
+          ? e.message
+          : "개선코드 생성 중 오류가 발생했습니다.",
     });
   }
 }
@@ -579,7 +703,6 @@ function getWebviewHtml(
     vscode.Uri.joinPath(extensionUri, "media", "logo.png")
   );
 
-  // ✅ ResultPanel에서 사용하는 이미지들
   const notFoundUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, "media", "not_found.png")
   );
@@ -609,7 +732,6 @@ function getWebviewHtml(
     <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; img-src ${webview.cspSource} https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' https:; font-src https:;" />
     
-    <!-- 🔤 Gowun Dodum 폰트 로딩 -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

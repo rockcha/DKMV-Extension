@@ -14,6 +14,11 @@ export type IncomingMessage =
   | { type: "ANALYZE_PROGRESS"; payload: string }
   | { type: "ANALYZE_RESULT"; payload: any }
   | { type: "ANALYZE_ERROR"; payload: string }
+
+  // ✅ 개선코드 생성 관련 (추가)
+  | { type: "IMPROVE_PROGRESS"; payload: string }
+  | { type: "IMPROVE_RESULT"; payload: any }
+  | { type: "IMPROVE_ERROR"; payload: string }
   | { type: string; payload?: any };
 
 export type ScoreCategories = {
@@ -44,20 +49,19 @@ export type ReviewIssue = {
 
 /**
  * VS Code 쪽에서 사용하는 분석 결과 타입
- * - Playground의 ReviewBody(quality_score, summary, scores_by_category, comments)와 호환되게 정의
  */
 export type AnalyzerResult = {
   quality_score: number;
-  review_summary?: string; // 예전 필드
-  summary?: string; // Playground /v1/reviews/{id} body.summary
+  review_summary?: string;
+  summary?: string;
   scores_by_category?: Partial<ScoreCategories>;
   review_details?: any;
 
-  comments?: Record<string, string>; // bug, maintainability, style, security ...
+  comments?: Record<string, string>;
   [key: string]: any;
 };
 
-export type TabId = "code" | "result";
+export type TabId = "token" | "code" | "result" | "improved";
 export type CategoryId = "bug" | "maintainability" | "style" | "security";
 
 export type CategoryComment = {

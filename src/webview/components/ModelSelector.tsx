@@ -50,6 +50,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
           alignItems: "center",
           gap: 8,
           width: "100%",
+          minWidth: 0, // ✅ flex 자식 shrink 허용(중요)
         }}
       >
         <span
@@ -61,6 +62,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
             display: "inline-flex",
             alignItems: "center",
             gap: 4,
+            flexShrink: 0, // ✅ 라벨은 줄어들지 않게
           }}
         >
           <Bot size={13} />
@@ -72,15 +74,16 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
             display: "flex",
             alignItems: "center",
             gap: 6,
-            flex: 1,
-            minWidth: 0,
+            flex: "1 1 0%", // ✅ 남는 공간을 차지 + shrink 가능
+            minWidth: 0, // ✅ 자식(input)이 부모 밖으로 안 나가게 핵심
           }}
         >
           <div
             style={{
               position: "relative",
               width: "100%",
-              minWidth: 0,
+              minWidth: 0, // ✅ 여기까지 내려줘야 안전
+              flex: "1 1 0%",
             }}
           >
             <Search
@@ -100,6 +103,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
               placeholder="모델 ID / provider 검색"
               style={{
                 width: "100%",
+                maxWidth: "100%", // ✅ 혹시 모를 overflow 방지
                 fontSize: 12,
                 padding: "6px 10px 6px 24px",
                 borderRadius: 999,
@@ -108,6 +112,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
                 color: "#e5e7eb",
                 outline: "none",
                 minWidth: 0,
+                boxSizing: "border-box", // ✅ padding/border 포함해서 width 계산
               }}
             />
           </div>
@@ -143,6 +148,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
               boxSizing: "border-box",
             }}
           >
+            {/* ⚠️ 웹뷰에서는 /public 경로가 아닐 수 있어. 아래 NOTE 참고 */}
             <img
               src="/public/not_found.png"
               alt="모델을 찾을 수 없습니다."
@@ -187,6 +193,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 8,
+                  minWidth: 0, // ✅ 내부 텍스트가 길어도 버튼이 안 튐
                 }}
               >
                 <span
@@ -194,6 +201,8 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
+                    minWidth: 0,
+                    flex: "1 1 0%",
                   }}
                   title={m.id}
                 >
@@ -204,6 +213,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
                     fontSize: 10,
                     color: active ? "#ede9fe" : "#9ca3af",
                     whiteSpace: "nowrap",
+                    flexShrink: 0,
                   }}
                 >
                   [{m.provider}]

@@ -11,20 +11,17 @@ import { EMPTY_CATEGORIES } from "./types";
 import { clampScore, extractScoresByCategory } from "./utils/scoring";
 import CodePanel from "./components/CodePanel";
 import ResultPanel from "./components/ResultPanel";
-import {
-  Bot,
-  Code2,
-  FileText,
-  Key,
-  Shield,
-  ExternalLink,
-  Bell,
-  LogOut,
-} from "lucide-react";
+import ImprovedCodePanel from "./components/ImprovedCodePanel";
+
+import { Key, Shield, ExternalLink, LogOut } from "lucide-react";
+import TopTabs from "./components/TopTabs";
+import StatusBar from "./components/StatusBar";
+import { appStyleText } from "./ui/appStyles";
+import { deriveReviewState, type ReviewUIState } from "./ui/reviewState";
 
 declare global {
   interface Window {
-    acquireVsCodeApi?: () => any;
+    acquireVsCodeApi?: () => { postMessage: (msg: unknown) => void };
     __DKMV_LOGO__?: string;
   }
 }
@@ -52,6 +49,22 @@ type ReviewMetaCompact = {
   audit?: string | null;
 };
 
+function safeJsonParse(input: string): unknown {
+  try {
+    return JSON.parse(input) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function toPrettyJson(input: unknown): string | null {
+  try {
+    return JSON.stringify(input, null, 2);
+  } catch {
+    return null;
+  }
+}
+
 export const App: React.FC = () => {
   const logoSrc = window.__DKMV_LOGO__ ?? "/logo.png";
 
@@ -62,14 +75,13 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
 
-  // ✅ 탭: "token" | "code" | "result"
+  // ✅ 탭
   const [activeTab, setActiveTab] = useState<TabId>("token");
 
   const [resultMessage, setResultMessage] =
     useState<string>("이곳에 메세지가 표시됩니다.");
   const [resultData, setResultData] = useState<AnalyzerResult | null>(null);
   const [reviewMeta, setReviewMeta] = useState<ReviewMetaCompact | null>(null);
-
   const [rawResponseText, setRawResponseText] = useState<string | null>(null);
 
   const [codeHighlight, setCodeHighlight] = useState(false);
@@ -85,7 +97,7 @@ export const App: React.FC = () => {
   const [displayCategoryScores, setDisplayCategoryScores] =
     useState<ScoreCategories>(EMPTY_CATEGORIES);
 
-  // 🔐 익스텐션에서 전달받는 로그인 상태 (GitHub + VSCode 토큰)
+  // 🔐 인증 상태
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -94,15 +106,34 @@ export const App: React.FC = () => {
   const [isSettingToken, setIsSettingToken] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
 
+  // ✅ 개선코드 상태
+  const [isImproving, setIsImproving] = useState(false);
+  const [improvedCode, setImprovedCode] = useState<string | null>(null);
+  const [improvedMessage, setImprovedMessage] =
+    useState<string>("아직 생성된 개선코드가 없습니다.");
+  const [hasNewImprovedCode, setHasNewImprovedCode] = useState(false);
+
   const flashCodeHighlight = () => {
     setCodeHighlight(true);
-    setTimeout(() => setCodeHighlight(false), 350);
+    window.setTimeout(() => setCodeHighlight(false), 350);
   };
 
   const flashResultHighlight = () => {
     setResultHighlight(true);
-    setTimeout(() => setResultHighlight(false), 350);
+    window.setTimeout(() => setResultHighlight(false), 350);
   };
+
+  // ✅ 상태 파생
+  const reviewState: ReviewUIState = deriveReviewState({
+    isAuthenticated,
+    hasCode: !!code.trim(),
+    isLoading,
+    hasResult: !!resultData,
+    isError,
+  });
+
+  // ✅ "분석 완료일 때만 개선코드 생성 가능"
+  const canGenerateImprovedCode = reviewState === "DONE";
 
   // VSCode → 웹뷰 메시지 핸들링
   useEffect(() => {
@@ -122,6 +153,14 @@ export const App: React.FC = () => {
         setIsSettingToken(false);
         setReviewMeta(null);
 
+        // 로그아웃이면 개선코드 상태도 리셋
+        if (!authed) {
+          setIsImproving(false);
+          setImprovedCode(null);
+          setImprovedMessage("아직 생성된 개선코드가 없습니다.");
+          setHasNewImprovedCode(false);
+        }
+
         if (!authed) {
           setResultMessage(
             "GitHub 로그인 및 토큰 인증 후 코드를 리뷰할 수 있습니다."
@@ -134,7 +173,6 @@ export const App: React.FC = () => {
           );
           setActiveTab("code");
         }
-
         return;
       }
 
@@ -169,6 +207,13 @@ export const App: React.FC = () => {
         flashCodeHighlight();
         setHasNewResult(false);
         setIsError(false);
+
+        // ✅ 새 코드가 오면 개선코드는 초기화(이전 개선코드가 남아 보이는 혼란 방지)
+        setIsImproving(false);
+        setImprovedCode(null);
+        setImprovedMessage("아직 생성된 개선코드가 없습니다.");
+        setHasNewImprovedCode(false);
+        return;
       }
 
       if (message.type === "ANALYZE_PROGRESS") {
@@ -176,6 +221,7 @@ export const App: React.FC = () => {
         setResultMessage(message.payload || "모델이 코드를 읽고 있습니다...");
         setActiveTab("result");
         setIsError(false);
+        return;
       }
 
       if (message.type === "ANALYZE_ERROR") {
@@ -189,21 +235,21 @@ export const App: React.FC = () => {
         setActiveTab("result");
         setIsError(true);
         setHasNewResult(false);
+        return;
       }
 
       if (message.type === "ANALYZE_RESULT") {
         setIsLoading(false);
 
-        const wrapper: any = message.payload;
-        let parsed: any = wrapper;
+        const wrapper = message.payload as unknown;
+
+        let parsed: unknown = wrapper;
         let rawText: string | null = null;
 
         if (typeof wrapper === "string") {
           rawText = wrapper;
-          try {
-            parsed = JSON.parse(wrapper);
-          } catch (e) {
-            console.warn("[DKMV] 응답 JSON 파싱 실패:", e);
+          parsed = safeJsonParse(wrapper);
+          if (!parsed) {
             setResultData(null);
             setRawResponseText(rawText);
             setResultMessage("응답은 왔지만 JSON 파싱에 실패했습니다.");
@@ -212,28 +258,32 @@ export const App: React.FC = () => {
             return;
           }
         } else {
-          try {
-            rawText = JSON.stringify(wrapper, null, 2);
-          } catch {
-            rawText = null;
-          }
+          rawText = toPrettyJson(wrapper);
         }
 
+        const parsedObj =
+          typeof parsed === "object" && parsed !== null
+            ? (parsed as Record<string, any>)
+            : null;
+
         const inner =
-          (parsed && parsed.analyzer_result) ||
-          (parsed && parsed.body?.review) ||
-          parsed;
+          parsedObj?.analyzer_result || parsedObj?.body?.review || parsedObj;
+
+        const innerObj =
+          typeof inner === "object" && inner !== null
+            ? (inner as Record<string, any>)
+            : null;
 
         const compactMeta: ReviewMetaCompact = {
-          reviewId: parsed?.review_id ?? null,
+          reviewId: parsedObj?.review_id ?? null,
           model:
-            inner?.model ??
-            parsed?.request_payload?.meta?.model ??
-            parsed?.raw_review_response?.meta?.model ??
+            innerObj?.model ??
+            parsedObj?.request_payload?.meta?.model ??
+            parsedObj?.raw_review_response?.meta?.model ??
             null,
           audit:
-            parsed?.raw_review_response?.meta?.audit?.created_at ??
-            parsed?.raw_review_response?.meta?.audit ??
+            parsedObj?.raw_review_response?.meta?.audit?.created_at ??
+            parsedObj?.raw_review_response?.meta?.audit ??
             undefined,
         };
 
@@ -245,6 +295,54 @@ export const App: React.FC = () => {
         flashResultHighlight();
         setHasNewResult(true);
         setIsError(false);
+
+        // ✅ 분석이 새로 완료되면 개선코드 상태는 “대기”로 초기화
+        setIsImproving(false);
+        setImprovedCode(null);
+        setImprovedMessage(
+          "분석 결과를 기반으로 개선코드를 생성할 수 있습니다."
+        );
+        setHasNewImprovedCode(false);
+
+        return;
+      }
+
+      // ✅ 개선코드 진행/결과 메시지 처리
+      if (message.type === "IMPROVED_PROGRESS") {
+        setIsImproving(true);
+        setImprovedMessage(message.payload || "개선코드를 생성 중입니다...");
+        setActiveTab("improved");
+        return;
+      }
+
+      if (message.type === "IMPROVED_ERROR") {
+        setIsImproving(false);
+        setImprovedCode(null);
+        setImprovedMessage(
+          typeof message.payload === "string"
+            ? `개선코드 생성 실패: ${message.payload}`
+            : "개선코드 생성 중 오류가 발생했습니다."
+        );
+        setActiveTab("improved");
+        return;
+      }
+
+      if (message.type === "IMPROVED_RESULT") {
+        setIsImproving(false);
+
+        const payload = message.payload;
+        const codeText =
+          typeof payload === "string"
+            ? payload
+            : payload?.improvedCode ?? payload?.code ?? "";
+
+        setImprovedCode(codeText || null);
+        setImprovedMessage(
+          codeText ? "개선코드가 생성되었습니다." : "개선코드가 비어있습니다."
+        );
+        setHasNewImprovedCode(true);
+        setActiveTab("improved");
+        return;
       }
     };
 
@@ -320,11 +418,41 @@ export const App: React.FC = () => {
 
     vscode.postMessage({
       type: "REQUEST_ANALYZE",
+      payload: { code, filePath, languageId, model: selectedModel },
+    });
+  };
+
+  const handleGenerateImprovedCode = () => {
+    if (!vscode) {
+      setImprovedMessage("VS Code API를 사용할 수 없습니다.");
+      return;
+    }
+    if (!canGenerateImprovedCode) {
+      setImprovedMessage("분석 완료 후 개선코드를 생성할 수 있습니다.");
+      setActiveTab("improved");
+      return;
+    }
+    if (!code.trim()) {
+      setImprovedMessage("개선할 코드가 없습니다.");
+      setActiveTab("improved");
+      return;
+    }
+
+    setIsImproving(true);
+    setImprovedCode(null);
+    setImprovedMessage("개선코드를 생성 중입니다...");
+    setHasNewImprovedCode(false);
+    setActiveTab("improved");
+
+    vscode.postMessage({
+      type: "REQUEST_IMPROVED_CODE",
       payload: {
         code,
         filePath,
         languageId,
         model: selectedModel,
+        reviewId: reviewMeta?.reviewId ?? null,
+        analyzerResult: resultData ?? null,
       },
     });
   };
@@ -332,9 +460,7 @@ export const App: React.FC = () => {
   const handleCodeKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
-      if (!isLoading) {
-        handleAnalyze();
-      }
+      if (!isLoading) handleAnalyze();
     }
   };
 
@@ -346,10 +472,7 @@ export const App: React.FC = () => {
   const handleOpenTokenPage = () => {
     const url = "https://web-dkmv.vercel.app/";
     if (vscode) {
-      vscode.postMessage({
-        type: "OPEN_TOKEN_PAGE",
-        payload: { url },
-      });
+      vscode.postMessage({ type: "OPEN_TOKEN_PAGE", payload: { url } });
     } else {
       window.open(url, "_blank", "noopener,noreferrer");
     }
@@ -385,9 +508,12 @@ export const App: React.FC = () => {
     setIsError(false);
     setHasNewResult(false);
 
-    if (vscode) {
-      vscode.postMessage({ type: "LOGOUT" });
-    }
+    setIsImproving(false);
+    setImprovedCode(null);
+    setImprovedMessage("아직 생성된 개선코드가 없습니다.");
+    setHasNewImprovedCode(false);
+
+    if (vscode) vscode.postMessage({ type: "LOGOUT" });
   };
 
   // 결과 데이터 → 점수 애니메이션
@@ -428,14 +554,10 @@ export const App: React.FC = () => {
         security: Math.round(targetCategories.security * ease),
       });
 
-      if (t >= 1) {
-        window.clearInterval(intervalId);
-      }
+      if (t >= 1) window.clearInterval(intervalId);
     }, frameMs);
 
-    return () => {
-      window.clearInterval(intervalId);
-    };
+    return () => window.clearInterval(intervalId);
   }, [resultData]);
 
   const statusColor = (() => {
@@ -451,237 +573,7 @@ export const App: React.FC = () => {
 
   return (
     <>
-      <style>
-        {`
-          @keyframes dkmv-logo-pulse {
-            0% {
-              filter: hue-rotate(0deg) brightness(1);
-              transform: scale(1);
-            }
-            50% {
-              filter: hue-rotate(12deg) brightness(1.12);
-              transform: scale(1.03);
-            }
-            100% {
-              filter: hue-rotate(-8deg) brightness(0.98);
-              transform: scale(1);
-            }
-          }
-
-          .dkmv-link-btn,
-          .dkmv-token-btn {
-            position: relative;
-            overflow: hidden;
-            transition:
-              transform 0.16s ease-out,
-              box-shadow 0.16s ease-out,
-              background 0.16s ease-out,
-              opacity 0.16s ease-out,
-              border-color 0.16s ease-out;
-          }
-          .dkmv-link-btn::before,
-          .dkmv-token-btn::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            opacity: 0;
-            background: radial-gradient(
-              circle at 0% 0%,
-              rgba(248,250,252,0.12),
-              transparent 60%
-            );
-            transition: opacity 0.22s ease-out;
-          }
-          .dkmv-link-btn:hover::before,
-          .dkmv-token-btn:hover::before {
-            opacity: 1;
-          }
-          .dkmv-link-btn:hover,
-          .dkmv-token-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 20px rgba(15,23,42,0.75);
-          }
-          .dkmv-link-btn:active,
-          .dkmv-token-btn:active {
-            transform: translateY(0);
-            box-shadow: 0 3px 10px rgba(15,23,42,0.9);
-          }
-
-          /* 아바타 버튼 */
-          .dkmv-avatar-button {
-            position: relative;
-            padding: 0;
-            margin: 0;
-            border: none;
-            background: transparent;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-          }
-          .dkmv-avatar-tooltip {
-            position: absolute;
-            bottom: -22px;
-            right: 0;
-            font-size: 10px;
-            background: rgba(15,23,42,0.98);
-            color: #e5e7eb;
-            padding: 4px 8px;
-            border-radius: 999px;
-            border: 1px solid rgba(79,70,229,0.8);
-            opacity: 0;
-            transform: translateY(4px);
-            pointer-events: none;
-            white-space: nowrap;
-            transition: opacity 0.15s ease, transform 0.15s ease;
-            z-index: 20;
-          }
-          .dkmv-avatar-button:hover .dkmv-avatar-tooltip {
-            opacity: 1;
-            transform: translateY(0);
-          }
-
-          /* 토큰 탭 레이아웃 */
-          .dkmv-token-root {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justifyContent: center;
-            padding: 16px 10px 18px;
-            box-sizing: border-box;
-          }
-
-          .dkmv-token-card {
-            width: 100%;
-            max-width: 640px;
-            border-radius: 16px;
-            border: 1px solid rgba(31,41,55,0.95);
-            background: radial-gradient(circle at 0% 0%, #020617, #020617);
-            padding: 18px 20px 20px;
-            box-shadow:
-              0 18px 40px rgba(15,23,42,0.9),
-              0 0 0 1px rgba(15,23,42,0.85);
-          }
-
-          .dkmv-token-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #e5e7eb;
-            text-align: center;
-            letter-spacing: 0.03em;
-          }
-
-          .dkmv-token-sub {
-            margin-top: 8px;
-            font-size: 11px;
-            line-height: 1.7;
-            color: #9ca3af;
-            text-align: center;
-          }
-
-          .dkmv-token-actions {
-            margin-top: 14px;
-            display: flex;
-            justify-content: center;
-          }
-
-          .dkmv-token-input-wrap {
-            margin-top: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            align-items: center;
-          }
-
-          .dkmv-token-input-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            justify-content: center;
-            width: 100%;
-          }
-
-          .dkmv-token-input {
-            flex: 1 1 260px;
-            max-width: 420px;
-            padding: 8px 10px;
-            border-radius: 10px;
-            border: 1px solid rgba(55,65,81,0.95);
-            background-color: #020617;
-            color: #e5e7eb;
-            font-size: 11px;
-            font-family:
-              ui-monospace,
-              SFMono-Regular,
-              Menlo,
-              Monaco,
-              Consolas,
-              "Liberation Mono",
-              "Courier New",
-              monospace;
-            outline: none;
-            box-sizing: border-box;
-            transition:
-              border-color 0.15s ease-out,
-              box-shadow 0.15s ease-out,
-              background 0.15s ease-out;
-          }
-
-          .dkmv-token-input:focus {
-            border-color: rgba(129,140,248,1);
-            box-shadow: 0 0 0 1px rgba(129,140,248,0.85);
-            background: #020617;
-          }
-
-          .dkmv-token-error {
-            font-size: 10px;
-            color: #fecaca;
-            text-align: center;
-          }
-
-          .dkmv-token-foot {
-            margin-top: 8px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 6px;
-            font-size: 10px;
-            color: #6b7280;
-          }
-
-          .dkmv-token-authed {
-            margin-bottom: 14px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 8px;
-          }
-
-          .dkmv-token-authed-main {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-          }
-
-          .dkmv-token-authed-text {
-            font-size: 12px;
-            color: #c7d2fe;
-          }
-
-          .dkmv-token-authed-sub {
-            font-size: 11px;
-            color: #9ca3af;
-            text-align: center;
-          }
-
-          @media (max-width: 640px) {
-            .dkmv-token-card {
-              padding: 16px 14px 18px;
-            }
-          }
-        `}
-      </style>
+      <style>{appStyleText}</style>
 
       <div
         style={{
@@ -696,7 +588,7 @@ export const App: React.FC = () => {
             "linear-gradient(135deg, #020617 0%, #030712 40%, #020617 100%)",
           color: "#e5e7eb",
           minHeight: "100vh",
-          maxWidth: 1200, // ✅ 넓은 화면에서 가운데 정렬
+          maxWidth: 1200,
           margin: "0 auto",
           width: "100%",
         }}
@@ -726,11 +618,7 @@ export const App: React.FC = () => {
             />
             <div style={{ display: "flex", flexDirection: "column" }}>
               <span
-                style={{
-                  fontWeight: 600,
-                  fontSize: 14,
-                  letterSpacing: 0.3,
-                }}
+                style={{ fontWeight: 600, fontSize: 14, letterSpacing: 0.3 }}
               >
                 Don&apos;t Kill My Vibe
               </span>
@@ -794,193 +682,31 @@ export const App: React.FC = () => {
             gap: 6,
           }}
         >
-          {/* 탭 헤더 */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              paddingTop: 4,
-              paddingBottom: 4,
-              borderBottom: "1px solid rgba(31,41,55,0.9)",
-            }}
-          >
-            <div
-              style={{
-                display: "inline-flex",
-                padding: 2,
-                borderRadius: 999,
-                backgroundColor: "rgba(15,23,42,0.9)",
-                border: "1px solid rgba(31,41,55,0.9)",
-                gap: 2,
-              }}
-            >
-              {(["token", "code", "result"] as TabId[]).map((id) => {
-                const label =
-                  id === "token"
-                    ? "토큰 인증"
-                    : id === "code"
-                    ? "입력 코드"
-                    : "리뷰 결과";
-                const Icon =
-                  id === "token" ? Key : id === "code" ? Code2 : FileText;
+          <TopTabs
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            isAuthenticated={isAuthenticated}
+            isLoading={isLoading || isImproving}
+            hasNewResult={hasNewResult}
+            setHasNewResult={setHasNewResult}
+            reviewState={reviewState}
+            canGenerateImprovedCode={canGenerateImprovedCode}
+            hasNewImprovedCode={hasNewImprovedCode}
+            setHasNewImprovedCode={setHasNewImprovedCode}
+          />
 
-                const isActive = activeTab === id;
-                const showBadge = id === "result" && hasNewResult;
+          <StatusBar
+            displayMessage={displayMessage}
+            statusColor={statusColor}
+            selectedModel={selectedModel}
+          />
 
-                // 🔒 토큰 미인증 시 code / result 탭 이동 불가
-                const lockedByAuth = !isAuthenticated && id !== "token";
-                const disabled =
-                  lockedByAuth || (isLoading && !isActive && id !== "token");
-
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      if (disabled) return;
-                      setActiveTab(id);
-                      if (id === "result") {
-                        setHasNewResult(false);
-                      }
-                    }}
-                    style={{
-                      padding: "6px 11px",
-                      fontSize: 11,
-                      borderRadius: 999,
-                      border: "none",
-                      backgroundColor: isActive
-                        ? "rgba(15,23,42,1)"
-                        : "transparent",
-                      color: disabled
-                        ? "rgba(75,85,99,0.8)"
-                        : isActive
-                        ? "#e5e7eb"
-                        : "#9ca3af",
-                      cursor: disabled ? "not-allowed" : "pointer",
-                      outline: "none",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      opacity: disabled ? 0.65 : 1,
-                      boxShadow: isActive
-                        ? "0 0 0 1px rgba(129,140,248,0.9)"
-                        : "none",
-                      transition:
-                        "background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease",
-                    }}
-                  >
-                    <Icon size={13} />
-                    <span>{label}</span>
-                    {showBadge && !disabled && (
-                      <span
-                        style={{
-                          display: "inline-block",
-                          width: 6,
-                          height: 6,
-                          borderRadius: 999,
-                          backgroundColor: "#a855f7",
-                        }}
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 상태 + 알림 아이콘 바 */}
-          <div
-            style={{
-              marginTop: 4,
-              marginBottom: 4,
-              fontSize: 11,
-              minHeight: 24,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              padding: "0 4px",
-              flexWrap: "wrap", // ✅ 좁은 폭에서 줄바꿈 허용
-            }}
-          >
-            {/* 🔔 상태 메시지 pill */}
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "4px 10px",
-                borderRadius: 999,
-                backgroundColor: "rgba(15,23,42,0.95)",
-                border: "1px solid rgba(31,41,55,0.9)",
-                color: statusColor,
-                flex: "1 1 260px",
-                minWidth: 0,
-                maxWidth: "100%",
-              }}
-            >
-              <Bell size={13} color="#a855f7" />
-              <span
-                style={{
-                  fontWeight: 500,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis", // ✅ 메세지 길어져도 한 줄로
-                }}
-              >
-                {displayMessage}
-              </span>
-            </div>
-
-            {/* 선택된 모델 표시 pill – 길어져도 레이아웃 유지 */}
-            {selectedModel && (
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 11,
-                  color: "#e5e7eb",
-                  opacity: 0.9,
-                  padding: "4px 10px",
-                  borderRadius: 999,
-                  border: "1px solid rgba(55,65,81,0.9)",
-                  backgroundColor: "rgba(15,23,42,0.96)",
-                  flexShrink: 0,
-                  maxWidth: 260, // ✅ 너무 길어지지 않게 제한
-                }}
-              >
-                <Bot size={14} color="#a855f7" />
-                <span
-                  style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={selectedModel}
-                >
-                  {selectedModel}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* 탭 콘텐츠 */}
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              marginTop: 2,
-            }}
-          >
-            {/* 🔐 토큰 탭 */}
+          <div style={{ flex: 1, minHeight: 0, marginTop: 2 }}>
+            {/* 토큰 탭 */}
             {activeTab === "token" && (
               <div className="dkmv-token-root">
                 <div className="dkmv-token-card">
                   {isAuthenticated && authUser ? (
-                    // ✅ 인증된 상태: 아바타 + 멘트 + 로그아웃만
                     <div
                       className="dkmv-token-authed"
                       style={{
@@ -1052,9 +778,7 @@ export const App: React.FC = () => {
                       </button>
                     </div>
                   ) : (
-                    // ✅ 로그아웃 상태: 토큰 안내 UI 전부
                     <>
-                      {/* 미니멀 아이콘 헤더 */}
                       <div
                         style={{
                           display: "flex",
@@ -1090,7 +814,9 @@ export const App: React.FC = () => {
                             backgroundColor: "rgba(15,23,42,0.9)",
                           }}
                         >
-                          <Code2 size={14} color="#e5e7eb" />
+                          <span style={{ display: "inline-flex" }}>
+                            <ExternalLink size={14} color="#e5e7eb" />
+                          </span>
                         </div>
                         <div
                           style={{
@@ -1108,7 +834,6 @@ export const App: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* 제목 / 설명 */}
                       <div>
                         <h2 className="dkmv-token-title">DKMV 토큰 인증하기</h2>
                         <p className="dkmv-token-sub">
@@ -1122,7 +847,6 @@ export const App: React.FC = () => {
                         </p>
                       </div>
 
-                      {/* 웹으로 가기 버튼 */}
                       <div className="dkmv-token-actions">
                         <button
                           type="button"
@@ -1148,7 +872,6 @@ export const App: React.FC = () => {
                         </button>
                       </div>
 
-                      {/* 토큰 입력 + 확인 버튼 */}
                       <div className="dkmv-token-input-wrap">
                         <div className="dkmv-token-input-row">
                           <input
@@ -1191,7 +914,6 @@ export const App: React.FC = () => {
                         )}
                       </div>
 
-                      {/* 하단 보안 메시지 */}
                       <div className="dkmv-token-foot">
                         <Shield size={11} />
                         <span>토큰은 이 VS Code 환경에만 저장됩니다.</span>
@@ -1235,6 +957,19 @@ export const App: React.FC = () => {
                 logoSrc={logoSrc}
                 reviewMeta={reviewMeta ?? undefined}
                 rawResponseText={rawResponseText}
+              />
+            )}
+
+            {/* ✅ 개선코드 탭 */}
+            {activeTab === "improved" && (
+              <ImprovedCodePanel
+                originalCode={code}
+                improveState={reviewState}
+                canGenerateImprovedCode={canGenerateImprovedCode}
+                isImproving={isImproving}
+                improvedCode={improvedCode}
+                improvedMessage={improvedMessage}
+                onGenerate={handleGenerateImprovedCode}
               />
             )}
           </div>
