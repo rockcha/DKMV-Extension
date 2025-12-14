@@ -1,6 +1,36 @@
 // src/webview/ui/appStyles.ts
 
 export const appStyleText = `
+  /* ---------------------------
+    Base / Font
+  --------------------------- */
+  :root {
+    --font-kr: "Gowun Dodum", "Noto Sans KR", "Apple SD Gothic Neo", "Segoe UI",
+      Arial, sans-serif;
+
+    --bg: #020617;
+    --bg2: #030712;
+    --panel: rgba(2,6,23,0.35);
+    --panel2: rgba(15,23,42,0.55);
+    --line: rgba(31,41,55,0.9);
+
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+
+    --accent: #a855f7;
+    --accent2: #38bdf8;
+
+    --focus-ring: 0 0 0 2px rgba(168,85,247,0.45), 0 0 0 4px rgba(56,189,248,0.18);
+  }
+
+  * {
+    box-sizing: border-box;
+    font-family: var(--font-kr);
+  }
+
+  /* ---------------------------
+    Logo pulse
+  --------------------------- */
   @keyframes dkmv-logo-pulse {
     0% {
       filter: hue-rotate(0deg) brightness(1);
@@ -16,6 +46,281 @@ export const appStyleText = `
     }
   }
 
+  /* ---------------------------
+    Shell layout
+  --------------------------- */
+  .dkmv-shell {
+    min-height: 100vh;
+    width: 100%;
+    background: linear-gradient(135deg, var(--bg) 0%, var(--bg2) 40%, var(--bg) 100%);
+    color: var(--text);
+  }
+
+  .dkmv-container {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 100vh;
+  }
+
+  /* ---------------------------
+    Top app bar (sketch-like)
+  --------------------------- */
+  .dkmv-topbar {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+  }
+
+  .dkmv-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .dkmv-brand-title {
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dkmv-top-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  /* ---------------------------
+    User badge (bigger avatar + nickname)
+  --------------------------- */
+  .dkmv-user-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+
+    padding: 6px 10px;
+  border:none;
+    background: rgba(2,6,23,0.35);
+    color: var(--text);
+
+    
+  }
+ 
+  
+  .dkmv-user-badge[disabled] {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .dkmv-user-name {
+    font-size: 12px;
+    font-weight: 900;
+    color: rgba(255,255,255,0.9);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 620px) {
+    .dkmv-user-name {
+      display: none;
+    }
+  }
+
+  /* ---------------------------
+    Row separators (tabs/status)
+  --------------------------- */
+  .dkmv-row {
+    padding-top: 8px;
+    padding-bottom: 8px;
+
+  }
+
+  /* ---------------------------
+    Status bar (sketch middle bar)
+  --------------------------- */
+  .dkmv-statusbar-like {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: center;
+
+    border-radius: 12px;
+    border: 1px solid rgba(148,163,184,0.22);
+    background: rgba(2,6,23,0.35);
+    padding: 10px 10px;
+  }
+
+  .dkmv-status-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    min-width: 0;
+  }
+
+  .dkmv-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    box-shadow: 0 0 0 2px rgba(2,6,23,0.6);
+    flex-shrink: 0;
+  }
+
+  .dkmv-status-msg {
+    font-size: 12px;
+    color: var(--text);
+    opacity: 0.92;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dkmv-primary {
+    border-radius: 999px;
+    border: 1px solid rgba(192,132,252,0.55);
+    background: linear-gradient(135deg, rgba(126,34,206,0.95), rgba(192,132,252,0.75));
+    color: #fff;
+    font-weight: 900;
+    font-size: 12px;
+    padding: 9px 12px;
+    cursor: pointer;
+    transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease, opacity 140ms ease;
+    box-shadow: 0 12px 26px rgba(0,0,0,0.28);
+    white-space: nowrap;
+  }
+  .dkmv-primary:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+  }
+  .dkmv-primary:active {
+    transform: translateY(0px);
+  }
+  .dkmv-primary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring), 0 12px 26px rgba(0,0,0,0.28);
+  }
+  .dkmv-primary[disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  @media (max-width: 620px) {
+    .dkmv-statusbar-like {
+      grid-template-columns: auto 1fr;
+    }
+    .dkmv-primary {
+      display: none;
+    }
+  }
+
+  /* ---------------------------
+    TopTabs: 4-split full width square buttons
+  --------------------------- */
+  .dkmv-tabs-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(148,163,184,0.22);
+    background: rgba(2,6,23,0.25);
+  }
+
+  .dkmv-tab-square {
+    height: 46px;
+    border: none;
+    background: rgba(15,23,42,0.35);
+    color: rgba(255,255,255,0.88);
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.2px;
+
+    cursor: pointer;
+    user-select: none;
+
+    transition:
+      background 160ms ease,
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      filter 160ms ease,
+      opacity 160ms ease;
+    position: relative;
+  }
+
+  /* vertical separators inside grid */
+  .dkmv-tab-square:not(:last-child) {
+    box-shadow: inset -1px 0 0 rgba(148,163,184,0.16);
+  }
+
+  .dkmv-tab-square:hover {
+    background: rgba(15,23,42,0.62);
+    filter: brightness(1.05);
+    transform: translateY(-0.5px);
+  }
+
+  .dkmv-tab-square:active {
+    transform: translateY(0);
+  }
+
+  .dkmv-tab-square:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    z-index: 2;
+  }
+
+  .dkmv-tab-square[data-active="true"] {
+    background: linear-gradient(
+      135deg,
+      rgba(126,34,206,0.85),
+      rgba(168,85,247,0.30)
+    );
+  }
+
+  .dkmv-tab-square[disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+  }
+
+  .dkmv-tab-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  @media (max-width: 620px) {
+    .dkmv-tab-square { gap: 0; }
+    .dkmv-tab-label { display: none; }
+  }
+
+  /* ---------------------------
+    Existing: link/token button hover effect
+  --------------------------- */
   .dkmv-link-btn,
   .dkmv-token-btn {
     position: relative;
@@ -55,47 +360,15 @@ export const appStyleText = `
     box-shadow: 0 3px 10px rgba(15,23,42,0.9);
   }
 
-  /* 아바타 버튼 */
-  .dkmv-avatar-button {
-    position: relative;
-    padding: 0;
-    margin: 0;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .dkmv-avatar-tooltip {
-    position: absolute;
-    bottom: -22px;
-    right: 0;
-    font-size: 10px;
-    background: rgba(15,23,42,0.98);
-    color: #e5e7eb;
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(79,70,229,0.8);
-    opacity: 0;
-    transform: translateY(4px);
-    pointer-events: none;
-    white-space: nowrap;
-    transition: opacity 0.15s ease, transform 0.15s ease;
-    z-index: 20;
-  }
-  .dkmv-avatar-button:hover .dkmv-avatar-tooltip {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  /* 토큰 탭 레이아웃 */
+  /* ---------------------------
+    Existing: token tab layout
+  --------------------------- */
   .dkmv-token-root {
     width: 100%;
     height: 100%;
     display: flex;
     align-items: center;
-    justifyContent: center;
+    justify-content: center;
     padding: 16px 10px 18px;
     box-sizing: border-box;
   }

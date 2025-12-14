@@ -1,19 +1,11 @@
-// src/webview/components/StatusBar.tsx
-
-import React from "react";
-import { Bell, Bot } from "lucide-react";
+import { Bell } from "lucide-react";
 
 type Props = {
   displayMessage: string;
   statusColor: string;
-  selectedModel: string;
 };
 
-export default function StatusBar({
-  displayMessage,
-  statusColor,
-  selectedModel,
-}: Props) {
+export default function StatusBar({ displayMessage, statusColor }: Props) {
   return (
     <div
       style={{
@@ -29,7 +21,6 @@ export default function StatusBar({
         flexWrap: "wrap",
       }}
     >
-      {/* 상태 메시지 pill */}
       <div
         style={{
           display: "inline-flex",
@@ -57,38 +48,6 @@ export default function StatusBar({
           {displayMessage}
         </span>
       </div>
-
-      {/* 선택된 모델 표시 pill */}
-      {selectedModel && (
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            color: "#e5e7eb",
-            opacity: 0.9,
-            padding: "4px 10px",
-            borderRadius: 999,
-            border: "1px solid rgba(55,65,81,0.9)",
-            backgroundColor: "rgba(15,23,42,0.96)",
-            flexShrink: 0,
-            maxWidth: 260,
-          }}
-        >
-          <Bot size={14} color="#a855f7" />
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={selectedModel}
-          >
-            {selectedModel}
-          </span>
-        </div>
-      )}
     </div>
   );
 }

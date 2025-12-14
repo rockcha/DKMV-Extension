@@ -9,13 +9,13 @@ import type {
 } from "./types";
 import { EMPTY_CATEGORIES } from "./types";
 import { clampScore, extractScoresByCategory } from "./utils/scoring";
+
 import CodePanel from "./components/CodePanel";
 import ResultPanel from "./components/ResultPanel";
 import ImprovedCodePanel from "./components/ImprovedCodePanel";
-
-import { Key, Shield, ExternalLink, LogOut } from "lucide-react";
 import TopTabs from "./components/TopTabs";
-import StatusBar from "./components/StatusBar";
+
+import { Bell, ExternalLink, Key, LogOut, Shield } from "lucide-react";
 import { appStyleText } from "./ui/appStyles";
 import { deriveReviewState, type ReviewUIState } from "./ui/reviewState";
 
@@ -73,13 +73,18 @@ export const App: React.FC = () => {
   const [languageId, setLanguageId] = useState<string>("plaintext");
   const [mode, setMode] = useState<"selection" | "document" | null>(null);
 
+  // loading
   const [isLoading, setIsLoading] = useState(false);
+  const [isImproving, setIsImproving] = useState(false);
+  const isBusy = isLoading || isImproving;
 
-  // ✅ 탭
+  // tabs
   const [activeTab, setActiveTab] = useState<TabId>("token");
 
+  // status msg
   const [resultMessage, setResultMessage] =
     useState<string>("이곳에 메세지가 표시됩니다.");
+
   const [resultData, setResultData] = useState<AnalyzerResult | null>(null);
   const [reviewMeta, setReviewMeta] = useState<ReviewMetaCompact | null>(null);
   const [rawResponseText, setRawResponseText] = useState<string | null>(null);
@@ -97,20 +102,17 @@ export const App: React.FC = () => {
   const [displayCategoryScores, setDisplayCategoryScores] =
     useState<ScoreCategories>(EMPTY_CATEGORIES);
 
-  // 🔐 인증 상태
+  // auth
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // 🔐 토큰 입력 UI 상태
+  // token UI
   const [tokenInput, setTokenInput] = useState("");
   const [isSettingToken, setIsSettingToken] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
 
-  // ✅ 개선코드 상태
-  const [isImproving, setIsImproving] = useState(false);
+  // improved code
   const [improvedCode, setImprovedCode] = useState<string | null>(null);
-  const [improvedMessage, setImprovedMessage] =
-    useState<string>("아직 생성된 개선코드가 없습니다.");
   const [hasNewImprovedCode, setHasNewImprovedCode] = useState(false);
 
   const flashCodeHighlight = () => {
@@ -123,19 +125,18 @@ export const App: React.FC = () => {
     window.setTimeout(() => setResultHighlight(false), 350);
   };
 
-  // ✅ 상태 파생
+  // derived state
   const reviewState: ReviewUIState = deriveReviewState({
     isAuthenticated,
     hasCode: !!code.trim(),
-    isLoading,
+    isLoading: isBusy,
     hasResult: !!resultData,
     isError,
   });
 
-  // ✅ "분석 완료일 때만 개선코드 생성 가능"
   const canGenerateImprovedCode = reviewState === "DONE";
 
-  // VSCode → 웹뷰 메시지 핸들링
+  // VSCode message handler
   useEffect(() => {
     const handler = (
       event: MessageEvent<IncomingMessage | AuthStateMessage | any>
@@ -143,7 +144,6 @@ export const App: React.FC = () => {
       const message = event.data;
       if (!message) return;
 
-      // 🔐 로그인/토큰 상태 동기화
       if (message.type === "AUTH_STATE") {
         const authed = !!message.payload?.isAuthenticated;
         const user = message.payload?.user ?? null;
@@ -153,15 +153,18 @@ export const App: React.FC = () => {
         setIsSettingToken(false);
         setReviewMeta(null);
 
-        // 로그아웃이면 개선코드 상태도 리셋
         if (!authed) {
+          setIsLoading(false);
           setIsImproving(false);
-          setImprovedCode(null);
-          setImprovedMessage("아직 생성된 개선코드가 없습니다.");
-          setHasNewImprovedCode(false);
-        }
 
-        if (!authed) {
+          setResultData(null);
+          setRawResponseText(null);
+          setHasNewResult(false);
+          setIsError(false);
+
+          setImprovedCode(null);
+          setHasNewImprovedCode(false);
+
           setResultMessage(
             "GitHub 로그인 및 토큰 인증 후 코드를 리뷰할 수 있습니다."
           );
@@ -169,7 +172,7 @@ export const App: React.FC = () => {
         } else {
           const name = user?.login ?? "사용자";
           setResultMessage(
-            `${name}님 환영합니다. 토큰 인증이 완료되었습니다. 코드를 선택하고 리뷰를 시작해보세요.`
+            `${name}님 인증되었습니다. 코드를 선택하고 모델을 고른 뒤 리뷰를 시작해보세요.`
           );
           setActiveTab("code");
         }
@@ -195,46 +198,57 @@ export const App: React.FC = () => {
         setMode(mode);
 
         setIsLoading(false);
+        setIsImproving(false);
+
         setResultData(null);
         setRawResponseText(null);
         setReviewMeta(null);
+        setHasNewResult(false);
+        setIsError(false);
+
+        setImprovedCode(null);
+        setHasNewImprovedCode(false);
+
         setResultMessage(
-          "코드를 받았습니다. 모델을 선택한 뒤 아래 [분석] 버튼 또는 Ctrl+Enter로 리뷰를 시작하세요."
+          "코드를 받았습니다. 모델을 선택한 뒤 [분석] 또는 Ctrl+Enter로 리뷰를 시작하세요."
         );
+
         setDisplayOverallScore(0);
         setDisplayCategoryScores(EMPTY_CATEGORIES);
         setActiveTab("code");
         flashCodeHighlight();
-        setHasNewResult(false);
-        setIsError(false);
-
-        // ✅ 새 코드가 오면 개선코드는 초기화(이전 개선코드가 남아 보이는 혼란 방지)
-        setIsImproving(false);
-        setImprovedCode(null);
-        setImprovedMessage("아직 생성된 개선코드가 없습니다.");
-        setHasNewImprovedCode(false);
         return;
       }
 
       if (message.type === "ANALYZE_PROGRESS") {
         setIsLoading(true);
-        setResultMessage(message.payload || "모델이 코드를 읽고 있습니다...");
-        setActiveTab("result");
+        setIsImproving(false);
         setIsError(false);
+
+        setResultMessage("리뷰 결과를 생성하는 중입니다...");
+        setActiveTab("result");
+        setHasNewResult(false);
         return;
       }
 
       if (message.type === "ANALYZE_ERROR") {
         setIsLoading(false);
+
         setResultData(null);
         setRawResponseText(null);
         setReviewMeta(null);
-        setResultMessage(`오류 발생: ${message.payload}`);
+
+        setResultMessage(`리뷰 생성 실패: ${message.payload}`);
         setDisplayOverallScore(0);
         setDisplayCategoryScores(EMPTY_CATEGORIES);
+
         setActiveTab("result");
         setIsError(true);
         setHasNewResult(false);
+
+        setIsImproving(false);
+        setImprovedCode(null);
+        setHasNewImprovedCode(false);
         return;
       }
 
@@ -252,7 +266,9 @@ export const App: React.FC = () => {
           if (!parsed) {
             setResultData(null);
             setRawResponseText(rawText);
-            setResultMessage("응답은 왔지만 JSON 파싱에 실패했습니다.");
+            setResultMessage(
+              "응답은 도착했지만 JSON 파싱에 실패했습니다. (원문은 JSON 섹션에서 확인 가능)"
+            );
             setIsError(true);
             setReviewMeta(null);
             return;
@@ -290,39 +306,39 @@ export const App: React.FC = () => {
         setRawResponseText(rawText);
         setResultData(inner as AnalyzerResult);
         setReviewMeta(compactMeta);
+
         setResultMessage("분석이 완료되었습니다.");
         setActiveTab("result");
         flashResultHighlight();
         setHasNewResult(true);
         setIsError(false);
 
-        // ✅ 분석이 새로 완료되면 개선코드 상태는 “대기”로 초기화
         setIsImproving(false);
         setImprovedCode(null);
-        setImprovedMessage(
-          "분석 결과를 기반으로 개선코드를 생성할 수 있습니다."
-        );
         setHasNewImprovedCode(false);
-
         return;
       }
 
-      // ✅ 개선코드 진행/결과 메시지 처리
       if (message.type === "IMPROVED_PROGRESS") {
         setIsImproving(true);
-        setImprovedMessage(message.payload || "개선코드를 생성 중입니다...");
+        setIsLoading(false);
+
+        setResultMessage("개선코드를 생성하는 중입니다...");
         setActiveTab("improved");
+        setHasNewImprovedCode(false);
         return;
       }
 
       if (message.type === "IMPROVED_ERROR") {
         setIsImproving(false);
         setImprovedCode(null);
-        setImprovedMessage(
+
+        const msg =
           typeof message.payload === "string"
             ? `개선코드 생성 실패: ${message.payload}`
-            : "개선코드 생성 중 오류가 발생했습니다."
-        );
+            : "개선코드 생성 중 오류가 발생했습니다.";
+
+        setResultMessage(msg);
         setActiveTab("improved");
         return;
       }
@@ -337,10 +353,10 @@ export const App: React.FC = () => {
             : payload?.improvedCode ?? payload?.code ?? "";
 
         setImprovedCode(codeText || null);
-        setImprovedMessage(
+        setHasNewImprovedCode(true);
+        setResultMessage(
           codeText ? "개선코드가 생성되었습니다." : "개선코드가 비어있습니다."
         );
-        setHasNewImprovedCode(true);
         setActiveTab("improved");
         return;
       }
@@ -348,17 +364,17 @@ export const App: React.FC = () => {
 
     window.addEventListener("message", handler);
 
-    if (vscode) {
-      vscode.postMessage({ type: "GET_AUTH_STATE" });
-    }
+    if (vscode) vscode.postMessage({ type: "GET_AUTH_STATE" });
 
     return () => window.removeEventListener("message", handler);
   }, []);
 
   const handleAnalyze = () => {
+    if (isBusy) return;
+
     if (!isAuthenticated) {
       setResultMessage(
-        "VS Code용 토큰을 먼저 설정해야 합니다. 상단 [토큰 인증] 탭에서 토큰을 연결해 주세요."
+        "토큰 인증이 필요합니다. 상단 [토큰 인증] 탭에서 토큰을 연결해 주세요."
       );
       setResultData(null);
       setRawResponseText(null);
@@ -373,7 +389,7 @@ export const App: React.FC = () => {
 
     if (!code.trim()) {
       setResultMessage(
-        "분석할 코드가 없습니다. 파일에서 코드를 선택 후 실행하거나 왼쪽에 코드를 붙여넣어 주세요."
+        "분석할 코드가 없습니다. 파일에서 코드를 선택하거나 왼쪽에 코드를 붙여넣어 주세요."
       );
       setResultData(null);
       setRawResponseText(null);
@@ -411,7 +427,8 @@ export const App: React.FC = () => {
     }
 
     setIsLoading(true);
-    setResultMessage("리뷰 요청을 준비 중입니다...");
+    setIsImproving(false);
+    setResultMessage("리뷰 요청을 전송했습니다. 결과를 생성하는 중입니다...");
     setIsError(false);
     setHasNewResult(false);
     setActiveTab("result");
@@ -423,26 +440,30 @@ export const App: React.FC = () => {
   };
 
   const handleGenerateImprovedCode = () => {
+    if (isBusy) return;
+
     if (!vscode) {
-      setImprovedMessage("VS Code API를 사용할 수 없습니다.");
+      setResultMessage("VS Code API를 사용할 수 없습니다.");
       return;
     }
     if (!canGenerateImprovedCode) {
-      setImprovedMessage("분석 완료 후 개선코드를 생성할 수 있습니다.");
+      setResultMessage("분석 완료 후 개선코드를 생성할 수 있습니다.");
       setActiveTab("improved");
       return;
     }
     if (!code.trim()) {
-      setImprovedMessage("개선할 코드가 없습니다.");
+      setResultMessage("개선할 코드가 없습니다.");
       setActiveTab("improved");
       return;
     }
 
     setIsImproving(true);
+    setIsLoading(false);
     setImprovedCode(null);
-    setImprovedMessage("개선코드를 생성 중입니다...");
     setHasNewImprovedCode(false);
     setActiveTab("improved");
+
+    setResultMessage("개선코드를 생성하는 중입니다...");
 
     vscode.postMessage({
       type: "REQUEST_IMPROVED_CODE",
@@ -460,7 +481,7 @@ export const App: React.FC = () => {
   const handleCodeKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
-      if (!isLoading) handleAnalyze();
+      if (!isBusy) handleAnalyze();
     }
   };
 
@@ -471,11 +492,9 @@ export const App: React.FC = () => {
 
   const handleOpenTokenPage = () => {
     const url = "https://web-dkmv.vercel.app/";
-    if (vscode) {
+    if (vscode)
       vscode.postMessage({ type: "OPEN_TOKEN_PAGE", payload: { url } });
-    } else {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
+    else window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const handleSubmitToken = () => {
@@ -490,11 +509,16 @@ export const App: React.FC = () => {
   };
 
   const handleLogoutClick = () => {
+    if (isBusy) return;
+
     setIsAuthenticated(false);
     setAuthUser(null);
     setTokenInput("");
     setTokenError(null);
     setIsSettingToken(false);
+
+    setIsLoading(false);
+    setIsImproving(false);
 
     setResultData(null);
     setRawResponseText(null);
@@ -508,15 +532,13 @@ export const App: React.FC = () => {
     setIsError(false);
     setHasNewResult(false);
 
-    setIsImproving(false);
     setImprovedCode(null);
-    setImprovedMessage("아직 생성된 개선코드가 없습니다.");
     setHasNewImprovedCode(false);
 
     if (vscode) vscode.postMessage({ type: "LOGOUT" });
   };
 
-  // 결과 데이터 → 점수 애니메이션
+  // score animation
   useEffect(() => {
     if (!resultData) {
       setDisplayOverallScore(0);
@@ -562,7 +584,7 @@ export const App: React.FC = () => {
 
   const statusColor = (() => {
     if (isError) return "#fca5a5";
-    if (isLoading) return "#c4b5fd";
+    if (isBusy) return "#c4b5fd";
     return "#a855f7";
   })();
 
@@ -571,360 +593,363 @@ export const App: React.FC = () => {
       ? resultMessage
       : "이곳에 메세지가 표시됩니다.";
 
+  const onPrimaryAction = () => {
+    if (activeTab === "code") return handleAnalyze();
+    if (activeTab === "improved") return handleGenerateImprovedCode();
+    setActiveTab("code");
+  };
+
+  const primaryLabel = activeTab === "improved" ? "개선코드 생성" : "분석하기";
+
   return (
     <>
       <style>{appStyleText}</style>
 
-      <div
-        style={{
-          fontFamily:
-            "'Gowun Dodum', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-          padding: "12px 14px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-          boxSizing: "border-box",
-          background:
-            "linear-gradient(135deg, #020617 0%, #030712 40%, #020617 100%)",
-          color: "#e5e7eb",
-          minHeight: "100vh",
-          maxWidth: 1200,
-          margin: "0 auto",
-          width: "100%",
-        }}
-      >
-        {/* 헤더 */}
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            paddingBottom: 6,
-            borderBottom: "1px solid rgba(31,41,55,0.9)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <img
-              src={logoSrc}
-              alt="Don't Kill My Vibe"
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 8,
-                objectFit: "contain",
-                animation: "dkmv-logo-pulse 5s ease-in-out infinite",
-              }}
+      <div className="dkmv-shell">
+        <div className="dkmv-container">
+          {/* Top bar */}
+          <header className="dkmv-topbar">
+            <div className="dkmv-brand">
+              <img
+                src={logoSrc}
+                alt="Don't Kill My Vibe"
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 8,
+                  objectFit: "contain",
+                  animation: "dkmv-logo-pulse 5s ease-in-out infinite",
+                }}
+              />
+              <span className="dkmv-brand-title">Don&apos;t Kill My Vibe</span>
+            </div>
+
+            <div className="dkmv-top-actions">
+              {isAuthenticated && authUser ? (
+                <button
+                  type="button"
+                  className="dkmv-user-badge"
+                  disabled={isBusy}
+                  onClick={() => {}}
+                  title={authUser.login}
+                >
+                  <img
+                    src={
+                      authUser.avatar_url ||
+                      "https://avatars.githubusercontent.com/u/0?v=4"
+                    }
+                    alt={authUser.login}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 999,
+                      objectFit: "cover",
+                      border: "1px solid rgba(165,180,252,0.75)",
+                    }}
+                  />
+                  <span className="dkmv-user-name">{authUser.login}</span>
+                </button>
+              ) : null}
+            </div>
+          </header>
+
+          {/* Tabs row */}
+          <div className="dkmv-row">
+            <TopTabs
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              isAuthenticated={isAuthenticated}
+              isLoading={isBusy}
+              hasNewResult={hasNewResult}
+              setHasNewResult={setHasNewResult}
+              reviewState={reviewState}
+              canGenerateImprovedCode={canGenerateImprovedCode}
+              hasNewImprovedCode={hasNewImprovedCode}
+              setHasNewImprovedCode={setHasNewImprovedCode}
             />
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span
-                style={{ fontWeight: 600, fontSize: 14, letterSpacing: 0.3 }}
-              >
-                Don&apos;t Kill My Vibe
-              </span>
+          </div>
+
+          {/* Status row */}
+          <div className="dkmv-row">
+            <div className="dkmv-statusbar-like">
+              <div className="dkmv-status-left">
+                <Bell size={16} />
+                <span
+                  className="dkmv-dot"
+                  style={{ background: statusColor }}
+                />
+              </div>
+
+              <div className="dkmv-status-msg" title={displayMessage}>
+                {displayMessage}
+              </div>
+
+              {/* ✅ token 탭에서는 분석/개선 버튼 자체를 숨김 */}
+              {activeTab !== "token" && (
+                <button
+                  type="button"
+                  className="dkmv-primary"
+                  onClick={onPrimaryAction}
+                  disabled={
+                    isBusy ||
+                    (activeTab === "code" &&
+                      (!code.trim() || !selectedModel)) ||
+                    (activeTab === "improved" && !canGenerateImprovedCode)
+                  }
+                  title={
+                    activeTab === "improved" ? "개선코드 생성" : "분석하기"
+                  }
+                >
+                  {primaryLabel}
+                </button>
+              )}
             </div>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexShrink: 0,
-            }}
-          >
-            {isAuthenticated && authUser && (
-              <button
-                type="button"
-                className="dkmv-avatar-button"
-                onClick={handleLogoutClick}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "#c4b5fd",
-                    maxWidth: 140,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {authUser.login}
-                </span>
-                <img
-                  src={
-                    authUser.avatar_url ||
-                    "https://avatars.githubusercontent.com/u/0?v=4"
-                  }
-                  alt={authUser.login}
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 999,
-                    objectFit: "cover",
-                    border: "1px solid rgba(165,180,252,0.9)",
-                  }}
-                />
-                <span className="dkmv-avatar-tooltip">로그아웃</span>
-              </button>
-            )}
-          </div>
-        </header>
-
-        {/* 메인 */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-            marginTop: 10,
-            gap: 6,
-          }}
-        >
-          <TopTabs
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            isAuthenticated={isAuthenticated}
-            isLoading={isLoading || isImproving}
-            hasNewResult={hasNewResult}
-            setHasNewResult={setHasNewResult}
-            reviewState={reviewState}
-            canGenerateImprovedCode={canGenerateImprovedCode}
-            hasNewImprovedCode={hasNewImprovedCode}
-            setHasNewImprovedCode={setHasNewImprovedCode}
-          />
-
-          <StatusBar
-            displayMessage={displayMessage}
-            statusColor={statusColor}
-            selectedModel={selectedModel}
-          />
-
-          <div style={{ flex: 1, minHeight: 0, marginTop: 2 }}>
-            {/* 토큰 탭 */}
+          {/* Main content */}
+          <div style={{ flex: 1, minHeight: 0 }}>
             {activeTab === "token" && (
-              <div className="dkmv-token-root">
-                <div className="dkmv-token-card">
-                  {isAuthenticated && authUser ? (
-                    <div
-                      className="dkmv-token-authed"
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: 12,
-                        paddingTop: 8,
-                        paddingBottom: 8,
-                      }}
-                    >
-                      <img
-                        src={
-                          authUser.avatar_url ||
-                          "https://avatars.githubusercontent.com/u/0?v=4"
-                        }
-                        alt={authUser.login}
-                        style={{
-                          width: 48,
-                          height: 48,
-                          borderRadius: 999,
-                          objectFit: "cover",
-                          border: "1px solid rgba(165,180,252,0.9)",
-                        }}
-                      />
-                      <div style={{ textAlign: "center" }}>
-                        <div
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: "#e5e7eb",
-                          }}
-                        >
-                          {authUser.login}님, 인증되었습니다.
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 11,
-                            color: "#9ca3af",
-                          }}
-                        >
-                          이제 에디터에서 DKMV 코드 리뷰를 바로 사용할 수
-                          있어요.
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleLogoutClick}
-                        className="dkmv-token-btn"
-                        style={{
-                          padding: "7px 16px",
-                          fontSize: 11,
-                          borderRadius: 999,
-                          border: "1px solid rgba(248,113,113,0.95)",
-                          background:
-                            "linear-gradient(90deg,rgba(239,68,68,1),rgba(248,113,113,1))",
-                          color: "#f9fafb",
-                          cursor: "pointer",
-                          fontWeight: 600,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          marginTop: 2,
-                        }}
-                      >
-                        <LogOut size={14} />
-                        <span>로그아웃</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <>
+              <section
+                style={{
+                  fontFamily: "var(--font-kr)",
+                  position: "relative",
+                  borderRadius: 10,
+                  border: "none",
+                  background:
+                    "radial-gradient(circle at top, rgba(30,64,175,0.18), transparent 60%), #020617",
+                  overflow: "hidden",
+                  height: "100%",
+                  minHeight: "calc(100vh - 170px)",
+                  boxSizing: "border-box",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div className="dkmv-token-root">
+                  <div className="dkmv-token-card">
+                    {isAuthenticated && authUser ? (
                       <div
+                        className="dkmv-token-authed"
                         style={{
                           display: "flex",
-                          justifyContent: "center",
-                          gap: 10,
-                          marginBottom: 10,
-                          opacity: 0.9,
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 12,
+                          paddingTop: 8,
+                          paddingBottom: 8,
                         }}
                       >
-                        <div
+                        <img
+                          src={
+                            authUser.avatar_url ||
+                            "https://avatars.githubusercontent.com/u/0?v=4"
+                          }
+                          alt={authUser.login}
                           style={{
-                            width: 26,
-                            height: 26,
+                            width: 48,
+                            height: 48,
                             borderRadius: 999,
-                            border: "1px solid rgba(129,140,248,0.9)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "rgba(15,23,42,0.9)",
+                            objectFit: "cover",
+                            border: "1px solid rgba(165,180,252,0.9)",
                           }}
-                        >
-                          <Key size={14} color="#a855f7" />
+                        />
+                        <div style={{ textAlign: "center" }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: "#e5e7eb",
+                            }}
+                          >
+                            {authUser.login}님, 인증되었습니다.
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize: 11,
+                              color: "#9ca3af",
+                            }}
+                          >
+                            이제 에디터에서 DKMV 코드 리뷰를 바로 사용할 수
+                            있어요.
+                          </div>
                         </div>
-                        <div
-                          style={{
-                            width: 26,
-                            height: 26,
-                            borderRadius: 999,
-                            border: "1px solid rgba(148,163,184,0.9)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "rgba(15,23,42,0.9)",
-                          }}
-                        >
-                          <span style={{ display: "inline-flex" }}>
-                            <ExternalLink size={14} color="#e5e7eb" />
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            width: 26,
-                            height: 26,
-                            borderRadius: 999,
-                            border: "1px solid rgba(56,189,248,0.9)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "rgba(15,23,42,0.9)",
-                          }}
-                        >
-                          <Shield size={14} color="#38bdf8" />
-                        </div>
-                      </div>
 
-                      <div>
-                        <h2 className="dkmv-token-title">DKMV 토큰 인증하기</h2>
-                        <p className="dkmv-token-sub">
-                          웹 대시보드에서 GitHub로 로그인한 뒤 발급받은{" "}
-                          <strong style={{ fontWeight: 500 }}>
-                            VS Code 토큰
-                          </strong>
-                          을 붙여넣으면,
-                          <br />
-                          에디터에서 바로 AI 코드 리뷰를 사용할 수 있습니다.
-                        </p>
-                      </div>
-
-                      <div className="dkmv-token-actions">
                         <button
                           type="button"
-                          onClick={handleOpenTokenPage}
-                          className="dkmv-link-btn"
+                          onClick={handleLogoutClick}
+                          className="dkmv-token-btn"
+                          disabled={isBusy}
                           style={{
                             padding: "7px 16px",
                             fontSize: 11,
                             borderRadius: 999,
-                            border: "1px solid rgba(148,163,184,0.9)",
-                            backgroundColor: "#020617",
-                            color: "#e5e7eb",
-                            cursor: "pointer",
-                            fontWeight: 500,
-                            whiteSpace: "nowrap",
+                            border: "1px solid rgba(248,113,113,0.95)",
+                            background:
+                              "linear-gradient(90deg,rgba(239,68,68,1),rgba(248,113,113,1))",
+                            color: "#f9fafb",
+                            cursor: isBusy ? "not-allowed" : "pointer",
+                            opacity: isBusy ? 0.7 : 1,
+                            fontWeight: 600,
                             display: "inline-flex",
                             alignItems: "center",
                             gap: 6,
+                            marginTop: 2,
                           }}
                         >
-                          <ExternalLink size={13} />
-                          <span>웹으로 가기</span>
+                          <LogOut size={14} />
+                          <span>로그아웃</span>
                         </button>
                       </div>
+                    ) : (
+                      <>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "center",
+                            gap: 10,
+                            marginBottom: 10,
+                            opacity: 0.9,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 999,
+                              border: "1px solid rgba(129,140,248,0.9)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: "rgba(15,23,42,0.9)",
+                            }}
+                          >
+                            <Key size={14} color="#a855f7" />
+                          </div>
+                          <div
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 999,
+                              border: "1px solid rgba(148,163,184,0.9)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: "rgba(15,23,42,0.9)",
+                            }}
+                          >
+                            <ExternalLink size={14} color="#e5e7eb" />
+                          </div>
+                          <div
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 999,
+                              border: "1px solid rgba(56,189,248,0.9)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: "rgba(15,23,42,0.9)",
+                            }}
+                          >
+                            <Shield size={14} color="#38bdf8" />
+                          </div>
+                        </div>
 
-                      <div className="dkmv-token-input-wrap">
-                        <div className="dkmv-token-input-row">
-                          <input
-                            className="dkmv-token-input"
-                            placeholder="DKMV 웹에서 발급한 VS Code 토큰을 붙여넣어 주세요."
-                            value={tokenInput}
-                            onChange={(e) => setTokenInput(e.target.value)}
-                          />
+                        <div>
+                          <h2 className="dkmv-token-title">
+                            DKMV 토큰 인증하기
+                          </h2>
+                          <p className="dkmv-token-sub">
+                            웹 대시보드에서 GitHub로 로그인한 뒤 발급받은{" "}
+                            <strong style={{ fontWeight: 500 }}>
+                              VS Code 토큰
+                            </strong>
+                            을 붙여넣으면,
+                            <br />
+                            에디터에서 바로 AI 코드 리뷰를 사용할 수 있습니다.
+                          </p>
+                        </div>
+
+                        <div className="dkmv-token-actions">
                           <button
                             type="button"
-                            onClick={handleSubmitToken}
-                            disabled={isSettingToken}
-                            className="dkmv-token-btn"
+                            onClick={handleOpenTokenPage}
+                            className="dkmv-link-btn"
                             style={{
-                              padding: "8px 18px",
-                              fontSize: 12,
-                              borderRadius: 10,
-                              border: "1px solid rgba(129,140,248,0.95)",
-                              background:
-                                "linear-gradient(90deg,rgba(79,70,229,1),rgba(129,140,248,1))",
-                              color: "#f9fafb",
-                              cursor: isSettingToken ? "default" : "pointer",
-                              opacity: isSettingToken ? 0.78 : 1,
-                              fontWeight: 600,
+                              padding: "7px 16px",
+                              fontSize: 11,
+                              borderRadius: 999,
+                              border: "1px solid rgba(148,163,184,0.9)",
+                              backgroundColor: "#020617",
+                              color: "#e5e7eb",
+                              cursor: "pointer",
+                              fontWeight: 500,
                               whiteSpace: "nowrap",
                               display: "inline-flex",
                               alignItems: "center",
                               gap: 6,
                             }}
                           >
-                            <Key size={15} />
-                            <span>
-                              {isSettingToken ? "토큰 확인 중..." : "확인"}
-                            </span>
+                            <ExternalLink size={13} />
+                            <span>웹으로 가기</span>
                           </button>
                         </div>
 
-                        {tokenError && (
-                          <div className="dkmv-token-error">{tokenError}</div>
-                        )}
-                      </div>
+                        <div className="dkmv-token-input-wrap">
+                          <div className="dkmv-token-input-row">
+                            <input
+                              className="dkmv-token-input"
+                              placeholder="DKMV 웹에서 발급한 VS Code 토큰을 붙여넣어 주세요."
+                              value={tokenInput}
+                              onChange={(e) => setTokenInput(e.target.value)}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSubmitToken}
+                              disabled={isSettingToken}
+                              className="dkmv-token-btn"
+                              style={{
+                                padding: "8px 18px",
+                                fontSize: 12,
+                                borderRadius: 10,
+                                border: "1px solid rgba(129,140,248,0.95)",
+                                background:
+                                  "linear-gradient(90deg,rgba(79,70,229,1),rgba(129,140,248,1))",
+                                color: "#f9fafb",
+                                cursor: isSettingToken ? "default" : "pointer",
+                                opacity: isSettingToken ? 0.78 : 1,
+                                fontWeight: 600,
+                                whiteSpace: "nowrap",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                              }}
+                            >
+                              <Key size={15} />
+                              <span>
+                                {isSettingToken ? "토큰 확인 중..." : "확인"}
+                              </span>
+                            </button>
+                          </div>
 
-                      <div className="dkmv-token-foot">
-                        <Shield size={11} />
-                        <span>토큰은 이 VS Code 환경에만 저장됩니다.</span>
-                      </div>
-                    </>
-                  )}
+                          {tokenError && (
+                            <div className="dkmv-token-error">{tokenError}</div>
+                          )}
+                        </div>
+
+                        <div className="dkmv-token-foot">
+                          <Shield size={11} />
+                          <span>토큰은 이 VS Code 환경에만 저장됩니다.</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </section>
             )}
 
-            {/* 코드 탭 */}
             {activeTab === "code" && (
               <CodePanel
                 code={code}
@@ -941,34 +966,31 @@ export const App: React.FC = () => {
                 }}
                 modelError={modelError}
                 onAnalyze={handleAnalyze}
-                isLoading={isLoading}
+                isLoading={isBusy}
               />
             )}
 
-            {/* 결과 탭 */}
             {activeTab === "result" && (
               <ResultPanel
                 resultData={resultData}
                 isError={isError}
-                isLoading={isLoading}
+                isLoading={isBusy}
                 resultHighlight={resultHighlight}
                 displayOverallScore={displayOverallScore}
                 displayCategoryScores={displayCategoryScores}
                 logoSrc={logoSrc}
-                reviewMeta={reviewMeta ?? undefined}
                 rawResponseText={rawResponseText}
+                selectedModel={selectedModel}
               />
             )}
 
-            {/* ✅ 개선코드 탭 */}
             {activeTab === "improved" && (
               <ImprovedCodePanel
+                logoSrc={logoSrc}
                 originalCode={code}
-                improveState={reviewState}
                 canGenerateImprovedCode={canGenerateImprovedCode}
                 isImproving={isImproving}
                 improvedCode={improvedCode}
-                improvedMessage={improvedMessage}
                 onGenerate={handleGenerateImprovedCode}
               />
             )}

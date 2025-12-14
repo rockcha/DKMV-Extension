@@ -20,6 +20,7 @@ declare global {
 
 type Props = {
   resultData: AnalyzerResult | null;
+  selectedModel: string;
   isError: boolean;
   isLoading: boolean;
   resultHighlight: boolean;
@@ -184,13 +185,14 @@ const baseCardStyle: CSSProperties = {
 
 const ResultPanel: React.FC<Props> = ({
   resultData,
+  selectedModel,
   isError,
   isLoading,
   resultHighlight,
   displayOverallScore,
   displayCategoryScores,
   logoSrc,
-  reviewMeta, // 사용은 안 하지만 prop 유지
+
   rawResponseText,
 }) => {
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
@@ -338,11 +340,11 @@ const ResultPanel: React.FC<Props> = ({
           border: "none",
           background:
             "radial-gradient(circle at top, rgba(30,64,175,0.25), transparent 60%), #020617",
-          padding: 10,
+
           position: "relative",
           overflow: "hidden",
           height: "100%",
-          minHeight: "calc(100vh - 160px)",
+          minHeight: "calc(100vh - 170px)",
           boxSizing: "border-box",
           opacity: hasMounted ? 1 : 0,
           transform: hasMounted ? "translateY(0)" : "translateY(6px)",
@@ -369,6 +371,30 @@ const ResultPanel: React.FC<Props> = ({
             transition: "border-color 0.18s ease-out",
           }}
         >
+          {selectedModel && (
+            <div
+              style={{
+                position: "absolute",
+                top: 14,
+                right: 14,
+                fontSize: 11,
+                color: "#e5e7eb",
+                opacity: 0.9,
+                padding: "4px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(55,65,81,0.9)",
+                backgroundColor: "rgba(15,23,42,0.96)",
+                maxWidth: 260,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={selectedModel}
+            >
+              모델: {selectedModel}
+            </div>
+          )}
+
           {/* 실제 내용 (로딩 시 blur) */}
           <div
             style={{

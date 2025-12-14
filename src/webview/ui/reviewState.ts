@@ -1,17 +1,15 @@
-// src/webview/ui/reviewState.ts
-
 export type ReviewUIState =
-  | "UNAUTH" // 토큰/로그인 안됨
-  | "EMPTY" // 코드 없음(기본 상태)
-  | "READY" // 코드 있음 + 분석 전
-  | "ANALYZING" // 분석 중
-  | "DONE" // 결과 있음(분석 완료)
-  | "ERROR"; // 오류 상태
+  | "UNAUTH"
+  | "EMPTY"
+  | "READY"
+  | "ANALYZING"
+  | "DONE"
+  | "ERROR";
 
 export function deriveReviewState(params: {
   isAuthenticated: boolean;
   hasCode: boolean;
-  isLoading: boolean;
+  isLoading: boolean; // ✅ 이제 "분석/개선코드 포함한 busy"로 들어옴
   hasResult: boolean;
   isError: boolean;
 }): ReviewUIState {
@@ -35,7 +33,7 @@ export function getStateBadge(state: ReviewUIState) {
       };
     case "EMPTY":
       return {
-        text: "대기",
+        text: "코드 필요",
         color: "#cbd5e1",
         border: "rgba(148,163,184,0.45)",
       };
@@ -47,7 +45,7 @@ export function getStateBadge(state: ReviewUIState) {
       };
     case "ANALYZING":
       return {
-        text: "분석 중",
+        text: "로딩 중",
         color: "#c4b5fd",
         border: "rgba(167,139,250,0.55)",
       };
