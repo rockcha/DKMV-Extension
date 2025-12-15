@@ -344,7 +344,7 @@ const ResultPanel: React.FC<Props> = ({
           position: "relative",
           overflow: "hidden",
           height: "100%",
-          minHeight: "calc(100vh - 170px)",
+          minHeight: "calc(100vh - 160px)",
           boxSizing: "border-box",
           opacity: hasMounted ? 1 : 0,
           transform: hasMounted ? "translateY(0)" : "translateY(6px)",

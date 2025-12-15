@@ -63,7 +63,7 @@ export const appStyleText = `
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+
     min-height: 100vh;
   }
 
@@ -112,14 +112,11 @@ export const appStyleText = `
     gap: 10px;
 
     padding: 6px 10px;
-  border:none;
+    border: none;
     background: rgba(2,6,23,0.35);
     color: var(--text);
-
-    
   }
- 
-  
+
   .dkmv-user-badge[disabled] {
     opacity: 0.6;
     cursor: not-allowed;
@@ -145,25 +142,22 @@ export const appStyleText = `
   /* ---------------------------
     Row separators (tabs/status)
   --------------------------- */
-  .dkmv-row {
-    padding-top: 8px;
-    padding-bottom: 8px;
-
-  }
+  .dkmv-row {}
 
   /* ---------------------------
     Status bar (sketch middle bar)
+    ✅ grid -> flex (버튼 절대 안 사라지게)
   --------------------------- */
   .dkmv-statusbar-like {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 10px;
+    display: flex;
     align-items: center;
+    gap: 10px;
 
-    border-radius: 12px;
-    border: 1px solid rgba(148,163,184,0.22);
-    background: rgba(2,6,23,0.35);
     padding: 10px 10px;
+
+    /* ✅ ellipsis가 먹히려면 필수 */
+    min-width: 0;
+    flex-wrap: nowrap;
   }
 
   .dkmv-status-left {
@@ -171,6 +165,7 @@ export const appStyleText = `
     align-items: center;
     gap: 8px;
     color: var(--muted);
+    flex: 0 0 auto;
     min-width: 0;
   }
 
@@ -186,9 +181,24 @@ export const appStyleText = `
     font-size: 12px;
     color: var(--text);
     opacity: 0.92;
+  }
+
+  /* ✅ 메시지 ... 처리 */
+  .dkmv-ellipsis {
+    min-width: 0;
+    flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* ✅ 버튼 래퍼: 절대 줄어들지 않음 */
+  .dkmv-status-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    flex-shrink: 0;
   }
 
   .dkmv-primary {
@@ -203,7 +213,11 @@ export const appStyleText = `
     transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease, opacity 140ms ease;
     box-shadow: 0 12px 26px rgba(0,0,0,0.28);
     white-space: nowrap;
+
+    /* ✅ 여기 중요: 버튼이 flex에서 줄어들지 않게 */
+    flex-shrink: 0;
   }
+
   .dkmv-primary:hover {
     transform: translateY(-1px);
     filter: brightness(1.05);
@@ -219,16 +233,57 @@ export const appStyleText = `
     opacity: 0.55;
     cursor: not-allowed;
     box-shadow: none;
+    transform: none;
+    animation: none;
   }
 
-  @media (max-width: 620px) {
-    .dkmv-statusbar-like {
-      grid-template-columns: auto 1fr;
-    }
-    .dkmv-primary {
-      display: none;
+  /* ✅ 준비되면(활성 상태) 살짝 빛나는 CTA */
+  .dkmv-cta-ready {
+    position: relative;
+    box-shadow:
+      0 0 0 1px rgba(168, 85, 247, 0.35),
+      0 0 18px rgba(168, 85, 247, 0.35),
+      0 12px 26px rgba(0,0,0,0.28);
+    animation: dkmv-cta-pulse 1.6s ease-in-out infinite;
+  }
+
+  .dkmv-cta-ready:hover:not([disabled]) {
+    box-shadow:
+      0 0 0 1px rgba(196, 181, 253, 0.55),
+      0 0 26px rgba(168, 85, 247, 0.55),
+      0 12px 26px rgba(0,0,0,0.28);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dkmv-cta-ready {
+      animation: none;
     }
   }
+
+  @keyframes dkmv-cta-pulse {
+    0% {
+      box-shadow:
+        0 0 0 1px rgba(168, 85, 247, 0.25),
+        0 0 14px rgba(168, 85, 247, 0.25),
+        0 12px 26px rgba(0,0,0,0.28);
+    }
+    50% {
+      box-shadow:
+        0 0 0 1px rgba(196, 181, 253, 0.55),
+        0 0 26px rgba(168, 85, 247, 0.55),
+        0 12px 26px rgba(0,0,0,0.28);
+    }
+    100% {
+      box-shadow:
+        0 0 0 1px rgba(168, 85, 247, 0.25),
+        0 0 14px rgba(168, 85, 247, 0.25),
+        0 12px 26px rgba(0,0,0,0.28);
+    }
+  }
+
+  /* ✅ 기존에 있던 "모바일에서 버튼 숨김" 제거!
+     - width 줄어도 버튼은 없어지면 안된다고 했으니까.
+     - 대신 메시지만 ... 처리됨. */
 
   /* ---------------------------
     TopTabs: 4-split full width square buttons

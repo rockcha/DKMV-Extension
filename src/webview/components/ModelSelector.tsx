@@ -1,8 +1,13 @@
 // src/webview/components/ModelSelector.tsx
-
 import React, { useMemo, useState } from "react";
 import { MODEL_OPTIONS } from "../modelOptions";
 import { Bot, Search } from "lucide-react";
+
+declare global {
+  interface Window {
+    __DKMV_NOT_FOUND__?: string;
+  }
+}
 
 type Props = {
   value: string;
@@ -32,6 +37,9 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
     ? "1px solid rgba(248,113,113,0.9)"
     : "1px solid rgba(55,65,81,0.9)";
 
+  // ✅ ResultPanel과 동일: 전역 주입 이미지 사용
+  const notFoundImageSrc = window.__DKMV_NOT_FOUND__ ?? "";
+
   return (
     <div
       style={{
@@ -50,7 +58,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
           alignItems: "center",
           gap: 8,
           width: "100%",
-          minWidth: 0, // ✅ flex 자식 shrink 허용(중요)
+          minWidth: 0,
         }}
       >
         <span
@@ -62,7 +70,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
             display: "inline-flex",
             alignItems: "center",
             gap: 4,
-            flexShrink: 0, // ✅ 라벨은 줄어들지 않게
+            flexShrink: 0,
           }}
         >
           <Bot size={13} />
@@ -74,15 +82,15 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
             display: "flex",
             alignItems: "center",
             gap: 6,
-            flex: "1 1 0%", // ✅ 남는 공간을 차지 + shrink 가능
-            minWidth: 0, // ✅ 자식(input)이 부모 밖으로 안 나가게 핵심
+            flex: "1 1 0%",
+            minWidth: 0,
           }}
         >
           <div
             style={{
               position: "relative",
               width: "100%",
-              minWidth: 0, // ✅ 여기까지 내려줘야 안전
+              minWidth: 0,
               flex: "1 1 0%",
             }}
           >
@@ -103,7 +111,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
               placeholder="모델 ID / provider 검색"
               style={{
                 width: "100%",
-                maxWidth: "100%", // ✅ 혹시 모를 overflow 방지
+                maxWidth: "100%",
                 fontSize: 12,
                 padding: "6px 10px 6px 24px",
                 borderRadius: 999,
@@ -112,7 +120,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
                 color: "#e5e7eb",
                 outline: "none",
                 minWidth: 0,
-                boxSizing: "border-box", // ✅ padding/border 포함해서 width 계산
+                boxSizing: "border-box",
               }}
             />
           </div>
@@ -148,17 +156,21 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
               boxSizing: "border-box",
             }}
           >
-            {/* ⚠️ 웹뷰에서는 /public 경로가 아닐 수 있어. 아래 NOTE 참고 */}
-            <img
-              src="/public/not_found.png"
-              alt="모델을 찾을 수 없습니다."
-              style={{
-                width: 72,
-                height: 72,
-                objectFit: "contain",
-                opacity: 0.95,
-              }}
-            />
+            {notFoundImageSrc ? (
+              <img
+                src={notFoundImageSrc}
+                alt="모델을 찾을 수 없습니다."
+                style={{
+                  width: 72,
+                  height: 72,
+                  objectFit: "contain",
+                  opacity: 0.95,
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: 28, opacity: 0.9 }}>🔎</div>
+            )}
+
             <span
               style={{
                 fontSize: 11,
@@ -193,7 +205,7 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 8,
-                  minWidth: 0, // ✅ 내부 텍스트가 길어도 버튼이 안 튐
+                  minWidth: 0,
                 }}
               >
                 <span

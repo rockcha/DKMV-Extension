@@ -1,18 +1,16 @@
 // src/webview/components/ImprovedCodePanel.tsx
-
-import React, { useMemo, useState, useEffect } from "react";
-import { Sparkles, Copy, Check } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import { Copy, Check, Scissors, FileCheck2 } from "lucide-react";
 
 type Props = {
-  canGenerateImprovedCode: boolean;
   isImproving: boolean;
 
   originalCode: string;
   improvedCode: string | null;
 
-  onGenerate: () => void;
+  onApplyToSelection?: () => void;
+  onApplyToFile?: () => void;
 
-  // ✅ ResultPanel처럼 로고로 로딩 돌리기 위한 이미지
   logoSrc: string;
 };
 
@@ -20,16 +18,34 @@ function normalizeNewlines(text: string) {
   return text.replace(/\\n/g, "\n").replace(/\r\n/g, "\n");
 }
 
+function sanitizeLLMCode(raw: string): string {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return "";
+
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === "string") return parsed;
+    } catch {}
+
+    const inner = trimmed.slice(1, -1);
+    return inner
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, "\n")
+      .replace(/\r\n/g, "\n");
+  }
+
+  return trimmed;
+}
+
 export default function ImprovedCodePanel({
-  canGenerateImprovedCode,
   isImproving,
   originalCode,
   improvedCode,
-  onGenerate,
+  onApplyToSelection,
+  onApplyToFile,
   logoSrc,
 }: Props) {
-  const disabled = !canGenerateImprovedCode || isImproving;
-
   const normalizedOriginal = useMemo(
     () => normalizeNewlines(originalCode || ""),
     [originalCode]
@@ -37,17 +53,18 @@ export default function ImprovedCodePanel({
 
   const normalizedImproved = useMemo(() => {
     if (!improvedCode) return null;
-    return normalizeNewlines(improvedCode);
+    const cleaned = sanitizeLLMCode(improvedCode);
+    return normalizeNewlines(cleaned);
   }, [improvedCode]);
 
   const canCopyImproved =
     !!normalizedImproved && normalizedImproved.trim().length > 0;
 
-  // ✅ Copy UX 상태: 텍스트 없이 아이콘만
-  const [copied, setCopied] = useState(false);
+  const canApply = canCopyImproved && !isImproving;
 
-  // ✅ 반응형: 좁아지면 세로 스택
+  const [copied, setCopied] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
+
   useEffect(() => {
     const handleResize = () => setIsNarrow(window.innerWidth < 900);
     handleResize();
@@ -55,7 +72,6 @@ export default function ImprovedCodePanel({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // ✅ 복사 성공 시 1.2초 후 원복
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(false), 1200);
@@ -89,12 +105,39 @@ export default function ImprovedCodePanel({
 
   return (
     <>
-      {/* ✅ ResultPanel과 동일한 링 스피너 keyframes */}
       <style>
         {`
           @keyframes dkmv-spinner-ring {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+          }
+
+          .dkmv-apply-btn{
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            padding:10px 12px;
+            border-radius:12px;
+            border: 1px solid rgba(196,181,253,0.45);
+            background: linear-gradient(90deg, rgba(124,58,237,0.95), rgba(168,85,247,0.95));
+            color:#fff;
+            font-weight:900;
+            font-size:12px;
+            cursor:pointer;
+            transition: transform 120ms ease, filter 160ms ease, opacity 160ms ease;
+            font-family: inherit;
+          }
+          .dkmv-apply-btn:hover{
+            filter: brightness(1.06);
+            transform: translateY(-1px);
+          }
+          .dkmv-apply-btn:disabled{
+            opacity:0.50;
+            cursor:not-allowed;
+            transform:none;
+            filter:none;
+            background: rgba(148,163,184,0.10);
+            border: 1px solid rgba(148,163,184,0.24);
           }
         `}
       </style>
@@ -107,17 +150,15 @@ export default function ImprovedCodePanel({
           border: "none",
           background:
             "radial-gradient(circle at top, rgba(30,64,175,0.18), transparent 60%), #020617",
-
           overflow: "hidden",
           height: "100%",
-          minHeight: "calc(100vh - 170px)",
+          minHeight: "calc(100vh - 160px)",
           boxSizing: "border-box",
           display: "flex",
           flexDirection: "column",
           gap: 10,
         }}
       >
-        {/* 내부 컨테이너 */}
         <div
           style={{
             flex: 1,
@@ -133,7 +174,6 @@ export default function ImprovedCodePanel({
             overflow: "hidden",
           }}
         >
-          {/* 실제 내용 (로딩 시 blur) */}
           <div
             style={{
               flex: 1,
@@ -146,22 +186,7 @@ export default function ImprovedCodePanel({
               minHeight: 0,
             }}
           >
-            {/* Header (멘트/아이콘 제거, 제목만) */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "4px 2px",
-              }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 950, color: "#fff" }}>
-                개선코드
-              </span>
-            </div>
-
-            {/* Split panels */}
+            {/* 원문/개선 2패널 */}
             <div
               style={{
                 flex: 1,
@@ -235,17 +260,18 @@ export default function ImprovedCodePanel({
                   transition: "border-color 180ms ease, background 180ms ease",
                 }}
               >
+                {/* ✅ 헤더 + 우상단 복사 버튼 */}
                 <div
                   style={{
                     padding: "8px 10px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    gap: 8,
+                    gap: 10,
                     borderBottom: "1px solid rgba(148,163,184,0.16)",
                   }}
                 >
-                  <span
+                  <div
                     style={{
                       fontSize: 11,
                       fontWeight: 950,
@@ -253,9 +279,8 @@ export default function ImprovedCodePanel({
                     }}
                   >
                     개선 코드
-                  </span>
+                  </div>
 
-                  {/* ✅ 아이콘만: Copy -> Check */}
                   <button
                     type="button"
                     disabled={!canCopyImproved || copied}
@@ -329,49 +354,42 @@ export default function ImprovedCodePanel({
                 justifyContent: "flex-end",
                 gap: 8,
                 marginTop: 2,
+                flexWrap: "wrap",
               }}
             >
               <button
                 type="button"
-                disabled={disabled}
-                onClick={onGenerate}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  border: "1px solid rgba(192,132,252,0.55)",
-                  background: disabled
-                    ? "rgba(148,163,184,0.18)"
-                    : "linear-gradient(135deg, rgba(126,34,206,0.95), rgba(192,132,252,0.75))",
-                  color: "#fff",
-                  fontWeight: 950,
-                  fontSize: 12,
-                  cursor: disabled ? "not-allowed" : "pointer",
-                  opacity: disabled ? 0.6 : 1,
-                  boxShadow: disabled ? "none" : "0 12px 26px rgba(0,0,0,0.28)",
-                  fontFamily: "inherit",
-                }}
+                onClick={onApplyToSelection}
+                disabled={!canApply || !onApplyToSelection}
+                className="dkmv-apply-btn"
                 title={
-                  !canGenerateImprovedCode
-                    ? "분석 완료 후 생성 가능"
-                    : undefined
+                  !canCopyImproved
+                    ? "개선코드가 있어야 적용할 수 있습니다."
+                    : "지금 에디터에서 드래그한 선택영역(또는 마지막 스냅샷)에 적용합니다."
                 }
               >
-                {isImproving ? (
-                  <span>생성 중...</span>
-                ) : (
-                  <>
-                    <Sparkles size={15} />
-                    <span>개선코드 생성</span>
-                  </>
-                )}
+                <Scissors size={15} />
+                <span>선택 영역에 적용</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onApplyToFile}
+                disabled={!canApply || !onApplyToFile}
+                className="dkmv-apply-btn"
+                title={
+                  !canCopyImproved
+                    ? "개선코드가 있어야 적용할 수 있습니다."
+                    : "파일을 선택한 뒤, 파일 전체를 개선코드로 교체합니다."
+                }
+              >
+                <FileCheck2 size={15} />
+                <span>파일에 적용</span>
               </button>
             </div>
           </div>
 
-          {/* ✅ 로딩 오버레이 - 로고 + 링 스피너 */}
+          {/* 로딩 오버레이 */}
           {isImproving && (
             <div
               style={{
@@ -420,13 +438,7 @@ export default function ImprovedCodePanel({
                 />
               </div>
 
-              <span
-                style={{
-                  fontSize: 14,
-                  color: "#e5e7eb",
-                  fontWeight: 600,
-                }}
-              >
+              <span style={{ fontSize: 14, color: "#e5e7eb", fontWeight: 600 }}>
                 개선코드를 생성하는 중...
               </span>
             </div>

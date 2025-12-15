@@ -1,36 +1,16 @@
 // src/extension.ts
 import * as vscode from "vscode";
 
-// 🔗 서버 엔드포인트
 const API_BASE = "http://18.205.229.159:8000";
-
 const AUTH_API_BASE = API_BASE;
 const REVIEW_API_BASE = API_BASE;
 
-// ✅ 새 리뷰 생성 & 조회 엔드포인트
 const REVIEW_REQUEST_URL = `${REVIEW_API_BASE}/v1/reviews/request`;
 const REVIEW_GET_URL = `${REVIEW_API_BASE}/v1/reviews`;
-
-// ✅ 개선코드 생성 엔드포인트 (웹 Playgound의 /api/v1/fix → 서버는 /v1/fix)
 const FIX_URL = `${API_BASE}/v1/fix`;
 
-// 🌐 웹 대시보드 주소 (토큰 발급 페이지 열 때 사용)
 const FRONTEND_URL = "https://web-dkmv.vercel.app";
 
-// 🔐 익스텐션 내부에서만 관리하는 인증 상태
-let authToken: string | null = null;
-let authUser: AuthUser | null = null;
-
-let panel: vscode.WebviewPanel | undefined;
-
-// ✅ 개선코드용 캐시(마지막 리뷰/코드)
-let lastReviewId: number | null = null;
-let lastAnalyzerResult: any = null;
-let lastCodeSnippet: string | null = null;
-let lastLanguageId: string | null = null;
-let lastModel: string | null = null;
-
-// 서버가 주는 유저 스펙(웹에서 쓰는 AuthUser와 거의 동일하게 맞춤)
 type AuthUser = {
   id: number;
   github_id?: string;
@@ -40,8 +20,12 @@ type AuthUser = {
   created_at?: string;
 };
 
+type EmptyPayload = Record<string, never>;
+
 type WebviewMessage =
   | { type: "REQUEST_FULL_DOCUMENT" }
+  | { type: "REQUEST_PICK_FILE"; payload?: EmptyPayload }
+  | { type: "REQUEST_PICK_SELECTION"; payload?: EmptyPayload }
   | {
       type: "REQUEST_ANALYZE";
       payload?: {
@@ -53,23 +37,23 @@ type WebviewMessage =
     }
   | {
       type: "REQUEST_IMPROVED_CODE";
-      payload?: {
-        code?: string;
-        filePath?: string;
-        languageId?: string;
-        model?: string;
-        reviewId?: number | null;
-        analyzerResult?: any;
-      };
+      payload?: { code?: string; reviewId?: number | null };
+    }
+  | {
+      type: "REQUEST_APPLY_IMPROVED_TO_SELECTION";
+      payload?: { improvedCode?: string };
+    }
+  | {
+      type: "REQUEST_APPLY_IMPROVED_TO_FILE";
+      payload?: { improvedCode?: string };
     }
   | { type: "GET_AUTH_STATE" }
   | { type: "OPEN_LOGIN" }
   | { type: "OPEN_TOKEN_PAGE" }
   | { type: "SET_TOKEN"; payload?: { token?: string } }
   | { type: "LOGOUT" }
-  | { type: string; payload?: any };
+  | { type: string; payload?: unknown };
 
-// ⚙️ /v1/reviews/request 스펙에 맞춘 타입
 type ReviewRequestPayload = {
   meta: {
     github_id: string | null;
@@ -80,23 +64,48 @@ type ReviewRequestPayload = {
     trigger: "manual" | "auto";
     code_fingerprint: string | null;
     model: string | null;
-    result: {
-      result_ref: string | null;
-      error_message: string | null;
-    } | null;
-    audit: string; // ISO 문자열
+    result: { result_ref: string | null; error_message: string | null } | null;
+    audit: string;
   };
-  body: {
-    snippet: {
-      code: string;
-    };
-  };
+  body: { snippet: { code: string } };
 };
+
+type SelectionSnapshot = {
+  filePath: string;
+  fileName: string;
+  languageId: string;
+  selection: vscode.Selection;
+  selectedText: string;
+};
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+  return typeof v === "object" && v !== null;
+}
+
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+let authToken: string | null = null;
+let authUser: AuthUser | null = null;
+
+let panel: vscode.WebviewPanel | undefined;
+
+let lastReviewId: number | null = null;
+let lastCodeSnippet: string | null = null;
+
+// ✅ 마지막 선택 스냅샷(중요: webview 클릭으로 activeTextEditor가 없어져도 적용 가능)
+let lastSelectionSnapshot: SelectionSnapshot | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log("DKMV Analyzer (React Webview) activated");
 
-  // 🔗 vscode://rockcha.dkmv/callback 으로 들어오는 URI 처리 (예전 플로우, 남겨둠)
   const uriHandler = vscode.window.registerUriHandler({
     async handleUri(uri: vscode.Uri) {
       await handleUriCallback(uri, context);
@@ -104,7 +113,6 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(uriHandler);
 
-  // ✅ VS Code 내에 토큰 설정용 커맨드 등록
   const setTokenCmd = vscode.commands.registerCommand(
     "dkmv.setToken",
     async () => {
@@ -119,7 +127,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(setTokenCmd);
 
-  // 🔁 코드 선택 분석 명령
   const disposable = vscode.commands.registerCommand(
     "dkmv.analyzeSelection",
     async () => {
@@ -135,7 +142,6 @@ export async function activate(context: vscode.ExtensionContext) {
       const code = hasSelection
         ? editor.document.getText(selection)
         : editor.document.getText();
-
       if (!code.trim()) {
         vscode.window.showInformationMessage("분석할 코드가 비어 있습니다.");
         return;
@@ -146,9 +152,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       ensureWebviewPanel(context);
 
-      // ✅ 개선코드 캐시(코드/언어)도 최신으로 유지
       lastCodeSnippet = code;
-      lastLanguageId = languageId;
 
       panel!.webview.postMessage({
         type: "NEW_CODE",
@@ -158,14 +162,56 @@ export async function activate(context: vscode.ExtensionContext) {
           filePath,
           languageId,
           mode: hasSelection ? "selection" : "document",
+          selectionInfo: hasSelection
+            ? {
+                hasSelection: true,
+                startLine: selection.start.line,
+                startChar: selection.start.character,
+                endLine: selection.end.line,
+                endChar: selection.end.character,
+              }
+            : null,
         },
       });
     }
   );
-
   context.subscriptions.push(disposable);
 
-  // 🔄 VS Code globalState 에 저장된 토큰 복원 시도
+  // ✅ 에디터 선택 변화 -> 스냅샷 저장 (적용 fallback 목적)
+  const selSub = vscode.window.onDidChangeTextEditorSelection((e) => {
+    if (!panel) return;
+
+    const editor = e.textEditor;
+    const sel = editor.selection;
+
+    const filePath = editor.document.uri.fsPath;
+    const fileName = editor.document.fileName;
+    const languageId = editor.document.languageId;
+    const selectedText = sel.isEmpty ? "" : editor.document.getText(sel);
+
+    lastSelectionSnapshot = {
+      filePath,
+      fileName,
+      languageId,
+      selection: sel,
+      selectedText,
+    };
+
+    panel.webview.postMessage({
+      type: "SELECTION_CHANGED",
+      payload: {
+        hasSelection: !sel.isEmpty,
+        startLine: sel.start.line,
+        startChar: sel.start.character,
+        endLine: sel.end.line,
+        endChar: sel.end.character,
+        filePath,
+        languageId,
+      },
+    });
+  });
+  context.subscriptions.push(selSub);
+
   const savedToken = context.globalState.get<string>("dkmv.authToken");
   if (savedToken) {
     await setAuthToken(savedToken, context, { silent: true });
@@ -174,9 +220,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
-/**
- * (예전 OAuth 플로우용) vscode://rockcha.dkmv/callback?token=...
- */
 async function handleUriCallback(
   uri: vscode.Uri,
   context: vscode.ExtensionContext
@@ -197,9 +240,6 @@ async function handleUriCallback(
   }
 }
 
-/**
- * 🔐 토큰 설정 + /v1/users/me 검증 + webview에 AUTH_STATE 전파
- */
 async function setAuthToken(
   token: string,
   context: vscode.ExtensionContext,
@@ -207,14 +247,11 @@ async function setAuthToken(
 ) {
   try {
     const res = await fetch(`${AUTH_API_BASE}/v1/users/me`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
 
-    if (!res.ok) {
+    if (!res.ok)
       throw new Error(`유효하지 않은 토큰입니다. (HTTP ${res.status})`);
-    }
 
     const me = (await res.json()) as AuthUser;
     authToken = token;
@@ -233,10 +270,7 @@ async function setAuthToken(
     if (panel) {
       panel.webview.postMessage({
         type: "AUTH_STATE",
-        payload: {
-          isAuthenticated: true,
-          user: authUser,
-        },
+        payload: { isAuthenticated: true, user: authUser },
       });
     }
   } catch (error) {
@@ -245,9 +279,7 @@ async function setAuthToken(
         ? error.message
         : "토큰 설정 중 알 수 없는 오류가 발생했습니다.";
 
-    if (!options?.silent) {
-      vscode.window.showErrorMessage(`DKMV: ${msg}`);
-    }
+    if (!options?.silent) vscode.window.showErrorMessage(`DKMV: ${msg}`);
 
     authToken = null;
     authUser = null;
@@ -256,15 +288,9 @@ async function setAuthToken(
     if (panel) {
       panel.webview.postMessage({
         type: "AUTH_STATE",
-        payload: {
-          isAuthenticated: false,
-          user: null,
-        },
+        payload: { isAuthenticated: false, user: null },
       });
-      panel.webview.postMessage({
-        type: "TOKEN_ERROR",
-        payload: msg,
-      });
+      panel.webview.postMessage({ type: "TOKEN_ERROR", payload: msg });
     }
   }
 }
@@ -295,13 +321,23 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
         case "REQUEST_FULL_DOCUMENT":
           await handleRequestFullDocument();
           break;
-
+        case "REQUEST_PICK_FILE":
+          await handleRequestPickFile();
+          break;
+        case "REQUEST_PICK_SELECTION":
+          await handleRequestPickSelection();
+          break;
         case "REQUEST_ANALYZE":
           await handleRequestAnalyze(message.payload ?? {});
           break;
-
         case "REQUEST_IMPROVED_CODE":
           await handleRequestImprovedCode(message.payload ?? {});
+          break;
+        case "REQUEST_APPLY_IMPROVED_TO_SELECTION":
+          await handleApplyImprovedToSelection(message.payload ?? {});
+          break;
+        case "REQUEST_APPLY_IMPROVED_TO_FILE":
+          await handleApplyImprovedToFile(message.payload ?? {});
           break;
 
         case "GET_AUTH_STATE":
@@ -325,7 +361,10 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
           break;
 
         case "SET_TOKEN": {
-          const token = message.payload?.token as string | undefined;
+          const token =
+            message.payload && isRecord(message.payload)
+              ? (message.payload.token as string | undefined)
+              : undefined;
           if (!token) {
             panel?.webview.postMessage({
               type: "TOKEN_ERROR",
@@ -337,27 +376,20 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
           break;
         }
 
-        case "LOGOUT": {
+        case "LOGOUT":
           authToken = null;
           authUser = null;
           await context.globalState.update("dkmv.authToken", undefined);
 
-          // 캐시도 리셋
           lastReviewId = null;
-          lastAnalyzerResult = null;
           lastCodeSnippet = null;
-          lastLanguageId = null;
-          lastModel = null;
+          lastSelectionSnapshot = null;
 
           panel?.webview.postMessage({
             type: "AUTH_STATE",
-            payload: {
-              isAuthenticated: false,
-              user: null,
-            },
+            payload: { isAuthenticated: false, user: null },
           });
           break;
-        }
 
         default:
           console.warn("[DKMV] Unknown message.type from webview:", message);
@@ -374,6 +406,208 @@ function ensureWebviewPanel(context: vscode.ExtensionContext) {
     null,
     context.subscriptions
   );
+}
+
+/**
+ * ✅ 드래그 선택 버튼(“코드 로드”용)
+ */
+async function handleRequestPickSelection() {
+  if (!panel) return;
+
+  panel.webview.postMessage({
+    type: "PICK_SELECTION_PROGRESS",
+    payload: "선택 영역을 가져오는 중입니다...",
+  });
+
+  const editor = vscode.window.activeTextEditor;
+
+  // 1) active editor 우선
+  if (editor) {
+    const selection = editor.selection;
+    if (selection.isEmpty) {
+      panel.webview.postMessage({
+        type: "PICK_SELECTION_ERROR",
+        payload: "코드를 드래그 하세요",
+      });
+      return;
+    }
+
+    const code = editor.document.getText(selection);
+    if (!code.trim()) {
+      panel.webview.postMessage({
+        type: "PICK_SELECTION_ERROR",
+        payload: "코드를 드래그 하세요",
+      });
+      return;
+    }
+
+    lastSelectionSnapshot = {
+      filePath: editor.document.uri.fsPath,
+      fileName: editor.document.fileName,
+      languageId: editor.document.languageId,
+      selection,
+      selectedText: code,
+    };
+
+    lastCodeSnippet = code;
+
+    panel.webview.postMessage({
+      type: "NEW_CODE",
+      payload: {
+        code,
+        fileName: editor.document.fileName,
+        filePath: editor.document.uri.fsPath,
+        languageId: editor.document.languageId,
+        mode: "selection",
+        selectionInfo: {
+          hasSelection: true,
+          startLine: selection.start.line,
+          startChar: selection.start.character,
+          endLine: selection.end.line,
+          endChar: selection.end.character,
+        },
+      },
+    });
+    return;
+  }
+
+  // 2) active editor 없으면 스냅샷 fallback
+  if (!lastSelectionSnapshot) {
+    panel.webview.postMessage({
+      type: "PICK_SELECTION_ERROR",
+      payload: "열려 있는 에디터가 없습니다.",
+    });
+    return;
+  }
+
+  const snap = lastSelectionSnapshot;
+
+  if (!snap.selectedText.trim() || snap.selection.isEmpty) {
+    panel.webview.postMessage({
+      type: "PICK_SELECTION_ERROR",
+      payload: "코드를 드래그 하세요",
+    });
+    return;
+  }
+
+  lastCodeSnippet = snap.selectedText;
+
+  panel.webview.postMessage({
+    type: "NEW_CODE",
+    payload: {
+      code: snap.selectedText,
+      fileName: snap.fileName,
+      filePath: snap.filePath,
+      languageId: snap.languageId,
+      mode: "selection",
+      selectionInfo: {
+        hasSelection: true,
+        startLine: snap.selection.start.line,
+        startChar: snap.selection.start.character,
+        endLine: snap.selection.end.line,
+        endChar: snap.selection.end.character,
+      },
+    },
+  });
+}
+
+/**
+ * ✅ QuickPick: 파일 전체 로드(“코드 로드”용)
+ */
+async function handleRequestPickFile() {
+  if (!panel) return;
+
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    panel.webview.postMessage({
+      type: "PICK_FILE_ERROR",
+      payload:
+        "워크스페이스가 열려있지 않습니다. 폴더를 연 뒤 다시 시도하세요.",
+    });
+    return;
+  }
+
+  panel.webview.postMessage({
+    type: "PICK_FILE_PROGRESS",
+    payload: "파일 목록을 불러오는 중입니다...",
+  });
+
+  try {
+    const include = "**/*.{ts,tsx,js,jsx,py,go,java,kt,rs,cpp,c,h,cs,json,md}";
+    const exclude =
+      "**/{node_modules,.git,dist,build,out,coverage,.next,.turbo,.vercel}/**";
+
+    const uris = await vscode.workspace.findFiles(include, exclude, 5000);
+    if (!uris.length) {
+      panel.webview.postMessage({
+        type: "PICK_FILE_ERROR",
+        payload: "선택할 파일을 찾지 못했습니다.",
+      });
+      return;
+    }
+
+    const items = uris.map((u) => {
+      const wsFolder = vscode.workspace.getWorkspaceFolder(u);
+      const rel = wsFolder ? vscode.workspace.asRelativePath(u) : u.fsPath;
+      return {
+        label: rel.split(/[\\/]/).slice(-1)[0],
+        description: rel,
+        uri: u,
+      };
+    });
+
+    const picked = await vscode.window.showQuickPick(items, {
+      title: "DKMV • 파일 선택",
+      placeHolder:
+        "불러올 파일을 선택하세요 (전체 코드가 Webview로 들어옵니다)",
+      matchOnDescription: true,
+      canPickMany: false,
+    });
+
+    if (!picked) {
+      panel.webview.postMessage({
+        type: "PICK_FILE_ERROR",
+        payload: "파일 선택이 취소되었습니다.",
+      });
+      return;
+    }
+
+    panel.webview.postMessage({
+      type: "PICK_FILE_PROGRESS",
+      payload: "파일을 여는 중입니다...",
+    });
+
+    const doc = await vscode.workspace.openTextDocument(picked.uri);
+    const fullCode = doc.getText();
+
+    if (!fullCode.trim()) {
+      panel.webview.postMessage({
+        type: "PICK_FILE_ERROR",
+        payload: "선택한 파일이 비어 있습니다.",
+      });
+      return;
+    }
+
+    lastCodeSnippet = fullCode;
+
+    panel.webview.postMessage({
+      type: "NEW_CODE",
+      payload: {
+        code: fullCode,
+        fileName: doc.fileName,
+        filePath: doc.uri.fsPath,
+        languageId: doc.languageId,
+        mode: "document",
+        selectionInfo: null,
+      },
+    });
+  } catch (e) {
+    panel.webview.postMessage({
+      type: "PICK_FILE_ERROR",
+      payload:
+        e instanceof Error ? e.message : "파일 선택 중 오류가 발생했습니다.",
+    });
+  }
 }
 
 async function handleRequestFullDocument() {
@@ -395,30 +629,21 @@ async function handleRequestFullDocument() {
     return;
   }
 
-  const fullFilePath = active.document.uri.fsPath;
-  const fullLanguageId = active.document.languageId;
-
-  // 캐시도 업데이트
   lastCodeSnippet = fullCode;
-  lastLanguageId = fullLanguageId;
 
   panel?.webview.postMessage({
     type: "NEW_CODE",
     payload: {
       code: fullCode,
       fileName: active.document.fileName,
-      filePath: fullFilePath,
-      languageId: fullLanguageId,
+      filePath: active.document.uri.fsPath,
+      languageId: active.document.languageId,
       mode: "document",
+      selectionInfo: null,
     },
   });
 }
 
-/**
- * 코드 분석 요청:
- *  1) POST /v1/reviews/request   → 리뷰 생성 + review_id 받기
- *  2) GET  /v1/reviews/{id}      → 실제 리뷰 결과 조회
- */
 async function handleRequestAnalyze(payload: {
   code?: string;
   filePath?: string;
@@ -469,11 +694,7 @@ async function handleRequestAnalyze(payload: {
         result: null,
         audit: nowIso,
       },
-      body: {
-        snippet: {
-          code: codeSnippet,
-        },
-      },
+      body: { snippet: { code: codeSnippet } },
     };
 
     panel?.webview.postMessage({
@@ -491,31 +712,20 @@ async function handleRequestAnalyze(payload: {
     });
 
     const postText = await postResp.text();
-    if (!postResp.ok) {
+    if (!postResp.ok)
       throw new Error(`리뷰 생성 실패 (HTTP ${postResp.status}): ${postText}`);
-    }
 
-    let reviewId: number | null = null;
-    let postJson: any = null;
-
-    try {
-      postJson = JSON.parse(postText);
-      reviewId = postJson?.body?.review_id ?? postJson?.review_id ?? null;
-    } catch {
-      // JSON 파싱 실패 시 아래에서 에러 처리
-    }
-
-    if (reviewId == null) {
+    const postJson = safeJsonParse(postText);
+    const reviewId = extractReviewId(postJson);
+    if (reviewId == null)
       throw new Error("리뷰 생성 응답에서 review_id를 찾을 수 없습니다.");
-    }
 
     panel!.webview.postMessage({
       type: "ANALYZE_PROGRESS",
       payload: `2/3 • 리뷰 생성 완료 (review_id: ${reviewId}). 결과를 조회합니다...`,
     });
 
-    const getUrl = `${REVIEW_GET_URL}/${reviewId}`;
-    const getResp = await fetch(getUrl, {
+    const getResp = await fetch(`${REVIEW_GET_URL}/${reviewId}`, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -524,25 +734,14 @@ async function handleRequestAnalyze(payload: {
     });
 
     const getText = await getResp.text();
-    if (!getResp.ok) {
+    if (!getResp.ok)
       throw new Error(`리뷰 조회 실패 (HTTP ${getResp.status}): ${getText}`);
-    }
 
-    let getJson: any = null;
-    try {
-      getJson = JSON.parse(getText);
-    } catch {
-      getJson = getText;
-    }
-
+    const getJson = safeJsonParse(getText) ?? getText;
     const analyzerResult = extractAnalyzerResultFromResponse(getJson);
 
-    // ✅ 개선코드용 캐시 저장
     lastReviewId = reviewId;
-    lastAnalyzerResult = analyzerResult;
     lastCodeSnippet = codeSnippet;
-    lastLanguageId = languageForReq;
-    lastModel = modelForReq;
 
     panel!.webview.postMessage({
       type: "ANALYZE_PROGRESS",
@@ -569,19 +768,10 @@ async function handleRequestAnalyze(payload: {
       type: "ANALYZE_PROGRESS",
       payload: "⚠️ 리뷰 처리 중 오류가 발생했습니다.",
     });
-
-    panel?.webview.postMessage({
-      type: "ANALYZE_ERROR",
-      payload: messageText,
-    });
+    panel?.webview.postMessage({ type: "ANALYZE_ERROR", payload: messageText });
   }
 }
 
-/**
- * ✅ 개선코드 생성 요청:
- *  - 웹 Playground처럼 POST /v1/fix 에 { review_id, code } 를 전송한다.
- *  - (중요) /v1/reviews/{id}/improved 같은 “가정 엔드포인트”는 사용하지 않는다. (404 원인)
- */
 async function handleRequestImprovedCode(payload: {
   code?: string;
   reviewId?: number | null;
@@ -604,7 +794,6 @@ async function handleRequestImprovedCode(payload: {
     });
     return;
   }
-
   if (reviewId == null) {
     panel?.webview.postMessage({
       type: "IMPROVED_ERROR",
@@ -619,32 +808,28 @@ async function handleRequestImprovedCode(payload: {
   });
 
   try {
-    const resp = await fetch(`${API_BASE}/v1/fix`, {
+    const resp = await fetch(FIX_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify({
-        review_id: reviewId,
-        code,
-      }),
+      body: JSON.stringify({ review_id: reviewId, code }),
     });
 
     const text = await resp.text();
-
-    if (!resp.ok) {
+    if (!resp.ok)
       throw new Error(`개선코드 생성 실패 (HTTP ${resp.status})\n${text}`);
-    }
 
-    // 서버 응답은 string or JSON → 문자열로 정규화
+    const parsed = safeJsonParse(text);
     let improvedCode = text;
-    try {
-      const parsed = JSON.parse(text);
-      improvedCode =
-        parsed?.improved_code ?? parsed?.code ?? parsed?.result ?? text;
-    } catch {
-      // plain text면 그대로 사용
+
+    if (isRecord(parsed)) {
+      const v =
+        (parsed.improved_code as string | undefined) ??
+        (parsed.code as string | undefined) ??
+        (parsed.result as string | undefined);
+      if (typeof v === "string") improvedCode = v;
     }
 
     panel?.webview.postMessage({
@@ -662,33 +847,236 @@ async function handleRequestImprovedCode(payload: {
   }
 }
 
-// 응답 안에서 AnalyzerResult 후보를 찾는 헬퍼
-function extractAnalyzerResultFromResponse(resp: any): any {
-  if (!resp || typeof resp !== "object") return resp;
+/**
+ * ✅ 개선 적용(선택영역): “지금 active editor selection” 우선, 없으면 lastSelectionSnapshot 적용
+ */
+async function handleApplyImprovedToSelection(payload: {
+  improvedCode?: string;
+}) {
+  if (!panel) return;
 
-  const candidates = [
-    resp?.analyzer_result,
-    resp?.body?.review,
-    resp?.body?.result,
-    resp?.body,
-    resp?.review,
+  const improved = payload.improvedCode ?? "";
+  if (!improved.trim()) {
+    panel.webview.postMessage({
+      type: "APPLY_ERROR",
+      payload: "적용할 개선코드가 비어 있습니다.",
+    });
+    return;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+
+  // 1) active selection 우선
+  if (editor && !editor.selection.isEmpty) {
+    const uri = editor.document.uri;
+    const range = editor.selection;
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(uri, range, improved);
+
+    const ok = await vscode.workspace.applyEdit(edit);
+    if (!ok) {
+      panel.webview.postMessage({
+        type: "APPLY_ERROR",
+        payload: "워크스페이스 편집 적용에 실패했습니다.",
+      });
+      return;
+    }
+
+    await revealAppliedFile(uri);
+    panel.webview.postMessage({
+      type: "APPLY_SUCCESS",
+      payload: "선택 영역에 개선코드를 적용했습니다.",
+    });
+    return;
+  }
+
+  // 2) fallback snapshot
+  if (!lastSelectionSnapshot || lastSelectionSnapshot.selection.isEmpty) {
+    panel.webview.postMessage({
+      type: "APPLY_ERROR",
+      payload:
+        "선택 영역이 없습니다. 에디터에서 코드를 드래그한 뒤 다시 적용하세요.",
+    });
+    return;
+  }
+
+  try {
+    const uri = vscode.Uri.file(lastSelectionSnapshot.filePath);
+    const range = new vscode.Range(
+      lastSelectionSnapshot.selection.start,
+      lastSelectionSnapshot.selection.end
+    );
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(uri, range, improved);
+
+    const ok = await vscode.workspace.applyEdit(edit);
+    if (!ok) throw new Error("워크스페이스 편집 적용에 실패했습니다.");
+
+    await revealAppliedFile(uri);
+    panel.webview.postMessage({
+      type: "APPLY_SUCCESS",
+      payload: "저장된 선택 영역에 개선코드를 적용했습니다.",
+    });
+  } catch (e) {
+    panel.webview.postMessage({
+      type: "APPLY_ERROR",
+      payload:
+        e instanceof Error
+          ? e.message
+          : "선택영역 적용 중 오류가 발생했습니다.",
+    });
+  }
+}
+
+/**
+ * ✅ 개선 적용(파일 전체): QuickPick으로 파일 고르게 한 뒤 전체 교체
+ */
+async function handleApplyImprovedToFile(payload: { improvedCode?: string }) {
+  if (!panel) return;
+
+  const improved = payload.improvedCode ?? "";
+  if (!improved.trim()) {
+    panel.webview.postMessage({
+      type: "APPLY_ERROR",
+      payload: "적용할 개선코드가 비어 있습니다.",
+    });
+    return;
+  }
+
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    panel.webview.postMessage({
+      type: "APPLY_ERROR",
+      payload:
+        "워크스페이스가 열려있지 않습니다. 폴더를 연 뒤 다시 시도하세요.",
+    });
+    return;
+  }
+
+  try {
+    const include = "**/*.{ts,tsx,js,jsx,py,go,java,kt,rs,cpp,c,h,cs,json,md}";
+    const exclude =
+      "**/{node_modules,.git,dist,build,out,coverage,.next,.turbo,.vercel}/**";
+
+    const uris = await vscode.workspace.findFiles(include, exclude, 5000);
+    if (!uris.length) {
+      panel.webview.postMessage({
+        type: "APPLY_ERROR",
+        payload: "선택할 파일을 찾지 못했습니다.",
+      });
+      return;
+    }
+
+    const items = uris.map((u) => {
+      const wsFolder = vscode.workspace.getWorkspaceFolder(u);
+      const rel = wsFolder ? vscode.workspace.asRelativePath(u) : u.fsPath;
+      return {
+        label: rel.split(/[\\/]/).slice(-1)[0],
+        description: rel,
+        uri: u,
+      };
+    });
+
+    const picked = await vscode.window.showQuickPick(items, {
+      title: "DKMV • 적용할 파일 선택",
+      placeHolder: "개선코드를 적용할 파일을 선택하세요 (파일 전체 교체)",
+      matchOnDescription: true,
+      canPickMany: false,
+    });
+
+    if (!picked) {
+      panel.webview.postMessage({
+        type: "APPLY_ERROR",
+        payload: "파일 선택이 취소되었습니다.",
+      });
+      return;
+    }
+
+    const uri = picked.uri;
+    const doc = await vscode.workspace.openTextDocument(uri);
+
+    const fullRange = new vscode.Range(
+      doc.positionAt(0),
+      doc.positionAt(doc.getText().length)
+    );
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(uri, fullRange, improved);
+
+    const ok = await vscode.workspace.applyEdit(edit);
+    if (!ok) throw new Error("워크스페이스 편집 적용에 실패했습니다.");
+
+    await revealAppliedFile(uri);
+    panel.webview.postMessage({
+      type: "APPLY_SUCCESS",
+      payload: "파일 전체에 개선코드를 적용했습니다.",
+    });
+  } catch (e) {
+    panel.webview.postMessage({
+      type: "APPLY_ERROR",
+      payload:
+        e instanceof Error ? e.message : "파일 적용 중 오류가 발생했습니다.",
+    });
+  }
+}
+
+async function revealAppliedFile(uri: vscode.Uri) {
+  try {
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(doc, {
+      viewColumn: vscode.ViewColumn.One,
+      preview: false,
+      preserveFocus: false,
+    });
+    if (panel) panel.reveal(vscode.ViewColumn.Beside, true);
+  } catch {
+    // 파일 다시 열기 실패는 무시 (적용 자체는 성공했을 수 있음)
+  }
+}
+
+function extractReviewId(resp: unknown): number | null {
+  if (!isRecord(resp)) return null;
+
+  // resp.body.review_id / resp.review_id 둘 다 대응
+  const body = resp.body;
+  if (isRecord(body) && typeof body.review_id === "number")
+    return body.review_id;
+
+  if (typeof resp.review_id === "number") return resp.review_id;
+
+  return null;
+}
+
+function extractAnalyzerResultFromResponse(resp: unknown): unknown {
+  if (!isRecord(resp)) return resp;
+
+  const candidates: unknown[] = [
+    (resp as UnknownRecord).analyzer_result,
+    isRecord(resp.body) ? (resp.body as UnknownRecord).review : undefined,
+    isRecord(resp.body) ? (resp.body as UnknownRecord).result : undefined,
+    resp.body,
+    (resp as UnknownRecord).review,
     resp,
   ];
 
   for (const c of candidates) {
-    if (!c || typeof c !== "object") continue;
-    if (
-      "quality_score" in c ||
-      "qualityScore" in c ||
-      "global_score" in c ||
-      "review_summary" in c ||
-      "scores_by_category" in c ||
-      "review_details" in c ||
-      "issues" in c
-    ) {
-      return c;
-    }
+    if (!isRecord(c)) continue;
+
+    const keys = [
+      "quality_score",
+      "qualityScore",
+      "global_score",
+      "review_summary",
+      "scores_by_category",
+      "review_details",
+      "issues",
+    ];
+
+    if (keys.some((k) => k in c)) return c;
   }
+
   return resp;
 }
 
@@ -731,7 +1119,7 @@ function getWebviewHtml(
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; img-src ${webview.cspSource} https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' https:; font-src https:;" />
-    
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

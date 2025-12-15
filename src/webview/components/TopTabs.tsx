@@ -60,13 +60,13 @@ export default function TopTabs({
   }> = [
     {
       id: "token",
-      label: "토큰 인증",
+      label: "인증하기",
       Icon: Key,
       getDisabled: (id) => (isLoading ? id !== activeTab : false),
     },
     {
       id: "code",
-      label: "입력 코드",
+      label: "코드 입력",
       Icon: Code2,
       getDisabled: (id) => {
         if (isLoading) return id !== activeTab;
@@ -76,7 +76,7 @@ export default function TopTabs({
     },
     {
       id: "result",
-      label: "리뷰 결과",
+      label: "리뷰 생성",
       Icon: FileText,
       onEnter: () => setHasNewResult(false),
       getDisabled: (id) => {
@@ -87,7 +87,7 @@ export default function TopTabs({
     },
     {
       id: "improved",
-      label: "개선코드",
+      label: "코드 개선",
       Icon: Wand2,
       onEnter: () => setHasNewImprovedCode(false),
       getDisabled: (id) => {
