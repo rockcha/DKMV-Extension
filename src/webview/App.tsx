@@ -14,7 +14,9 @@ import ResultPanel from "./components/ResultPanel";
 import ImprovedCodePanel from "./components/ImprovedCodePanel";
 import TopTabs from "./components/TopTabs";
 
-import { Bell, ExternalLink, Key, LogOut, Shield } from "lucide-react";
+import TokenAuthCard from "./components/TokenAuthCard";
+
+import { Bell } from "lucide-react";
 import { appStyleText } from "./ui/appStyles";
 import { deriveReviewState, type ReviewUIState } from "./ui/reviewState";
 
@@ -519,7 +521,7 @@ export const App: React.FC = () => {
       setResultMessage("VS Code API를 사용할 수 없습니다.");
       return;
     }
-    if (!canGenerateImprovedCode) {
+    if (reviewState !== "DONE") {
       setResultMessage("분석 완료 후 개선코드를 생성할 수 있습니다.");
       setActiveTab("improved");
       return;
@@ -648,39 +650,39 @@ export const App: React.FC = () => {
     if (vscode) vscode.postMessage({ type: "LOGOUT" });
   };
 
-  // ✅ 개선 적용: 선택영역(모드 무관)
-  const handleApplyToSelection = () => {
+  // ✅ 개선 적용: 선택영역(모드 무관) - "정리된 코드"를 인자로 받음
+  const handleApplyToSelection = (cleanedCode: string) => {
     if (!vscode) {
       setResultMessage("VS Code API를 사용할 수 없습니다.");
       return;
     }
-    if (!improvedCode || !improvedCode.trim()) {
+    if (!cleanedCode || !cleanedCode.trim()) {
       setResultMessage("적용할 개선코드가 없습니다.");
       return;
     }
 
     vscode.postMessage({
       type: "REQUEST_APPLY_IMPROVED_TO_SELECTION",
-      payload: { improvedCode },
+      payload: { improvedCode: cleanedCode },
     });
 
     setResultMessage("선택 영역에 개선코드를 적용하는 중입니다...");
   };
 
-  // ✅ 개선 적용: 파일 전체(모드 무관)
-  const handleApplyToFile = () => {
+  // ✅ 개선 적용: 파일 전체(모드 무관) - "정리된 코드"를 인자로 받음
+  const handleApplyToFile = (cleanedCode: string) => {
     if (!vscode) {
       setResultMessage("VS Code API를 사용할 수 없습니다.");
       return;
     }
-    if (!improvedCode || !improvedCode.trim()) {
+    if (!cleanedCode || !cleanedCode.trim()) {
       setResultMessage("적용할 개선코드가 없습니다.");
       return;
     }
 
     vscode.postMessage({
       type: "REQUEST_APPLY_IMPROVED_TO_FILE",
-      payload: { improvedCode },
+      payload: { improvedCode: cleanedCode },
     });
 
     setResultMessage("파일을 선택한 뒤, 파일 전체에 개선코드를 적용합니다...");
@@ -730,12 +732,6 @@ export const App: React.FC = () => {
     return () => window.clearInterval(intervalId);
   }, [resultData]);
 
-  const statusColor = (() => {
-    if (isError) return "#fca5a5";
-    if (isBusy || isPickingFile || isPickingSelection) return "#c4b5fd";
-    return "#a855f7";
-  })();
-
   const displayMessage =
     resultMessage && resultMessage.trim().length > 0
       ? resultMessage
@@ -751,6 +747,13 @@ export const App: React.FC = () => {
 
   const canPressImprove =
     !isBusy && !isPickingFile && !isPickingSelection && canGenerateImprovedCode;
+
+  const bellColor = (() => {
+    if (isError) return "#fca5a5";
+    if (hasNewResult || hasNewImprovedCode) return "#fbbf24";
+    if (isBusy || isPickingFile || isPickingSelection) return "#c4b5fd";
+    return "#a855f7";
+  })();
 
   return (
     <>
@@ -815,17 +818,26 @@ export const App: React.FC = () => {
               canGenerateImprovedCode={canGenerateImprovedCode}
               hasNewImprovedCode={hasNewImprovedCode}
               setHasNewImprovedCode={setHasNewImprovedCode}
+              hasNewImprovedCode={hasNewImprovedCode}
+              setHasNewImprovedCode={setHasNewImprovedCode}
             />
           </div>
 
-          {/* ✅ 메시지 섹션: 버튼 절대 사라지지 + 메시지는 ... 처리 */}
           <div className="dkmv-row">
             <div className="dkmv-statusbar-like dkmv-statusbar-tight">
               <div className="dkmv-status-left">
-                <Bell size={16} />
-                <span
-                  className="dkmv-dot"
-                  style={{ background: statusColor }}
+                <Bell
+                  size={24}
+                  style={{
+                    color: bellColor,
+                    filter: "drop-shadow(0 0 10px rgba(168,85,247,0.22))",
+                    transition:
+                      "color 160ms ease, filter 160ms ease, transform 160ms ease",
+                    transform:
+                      isBusy || isPickingFile || isPickingSelection
+                        ? "scale(1.03)"
+                        : "scale(1)",
+                  }}
                 />
               </div>
 
@@ -881,213 +893,30 @@ export const App: React.FC = () => {
                   position: "relative",
                   borderRadius: 10,
                   border: "none",
-                  background:
-                    "radial-gradient(circle at top, rgba(30,64,175,0.18), transparent 60%), #020617",
+                  background: "transparent",
                   overflow: "hidden",
-                  height: "100%",
+                  height: "calc(100vh - 170px)",
                   minHeight: "calc(100vh - 170px)",
                   boxSizing: "border-box",
                   display: "flex",
                   flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
                   gap: 10,
                 }}
               >
-                <div className="dkmv-token-root">
-                  <div className="dkmv-token-card">
-                    {isAuthenticated && authUser ? (
-                      <div style={{ color: "#e5e7eb" }}>
-                        {/* ✅ 환영 영역 복구 */}
-                        <div
-                          style={{
-                            padding: 14,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 12,
-                            borderBottom: "1px solid rgba(148,163,184,0.12)",
-                          }}
-                        >
-                          <img
-                            src={
-                              authUser.avatar_url ||
-                              "https://avatars.githubusercontent.com/u/0?v=4"
-                            }
-                            alt={authUser.login}
-                            style={{
-                              width: 44,
-                              height: 44,
-                              borderRadius: 999,
-                              objectFit: "cover",
-                              border: "1px solid rgba(165,180,252,0.75)",
-                            }}
-                          />
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 2,
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 900,
-                                color: "#f9fafb",
-                              }}
-                            >
-                              {authUser.login}님, 환영합니다 👋
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11,
-                                color: "rgba(255,255,255,0.60)",
-                              }}
-                            >
-                              토큰 인증이 완료되었습니다. 상단 탭에서 코드
-                              리뷰/개선을 진행하세요.
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* ✅ 로그아웃 */}
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "center",
-                            padding: 12,
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={handleLogoutClick}
-                            disabled={isBusy}
-                            style={{
-                              padding: "7px 16px",
-                              fontSize: 11,
-                              borderRadius: 999,
-                              border: "1px solid rgba(248,113,113,0.95)",
-                              background:
-                                "linear-gradient(90deg,rgba(239,68,68,1),rgba(248,113,113,1))",
-                              color: "#f9fafb",
-                              cursor: isBusy ? "not-allowed" : "pointer",
-                              opacity: isBusy ? 0.7 : 1,
-                              fontWeight: 600,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                            }}
-                          >
-                            <LogOut size={14} />
-                            로그아웃
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ color: "#e5e7eb" }}>
-                        <div style={{ padding: 12 }}>
-                          <h2
-                            style={{
-                              fontSize: 16,
-                              fontWeight: 800,
-                              marginBottom: 6,
-                            }}
-                          >
-                            DKMV 토큰 인증하기
-                          </h2>
-                          <p
-                            style={{
-                              fontSize: 12,
-                              color: "#9ca3af",
-                              marginBottom: 12,
-                            }}
-                          >
-                            웹 대시보드에서 발급받은 VS Code 토큰을 붙여넣어
-                            주세요.
-                          </p>
-
-                          <button
-                            type="button"
-                            onClick={handleOpenTokenPage}
-                            style={{
-                              padding: "7px 16px",
-                              fontSize: 11,
-                              borderRadius: 999,
-                              border: "1px solid rgba(148,163,184,0.9)",
-                              backgroundColor: "#020617",
-                              color: "#e5e7eb",
-                              cursor: "pointer",
-                              fontWeight: 500,
-                              marginBottom: 10,
-                            }}
-                          >
-                            <ExternalLink
-                              size={13}
-                              style={{ marginRight: 6 }}
-                            />
-                            웹으로 가기
-                          </button>
-
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <input
-                              style={{
-                                flex: 1,
-                                padding: "8px 10px",
-                                borderRadius: 10,
-                                border: "1px solid rgba(75,85,99,0.9)",
-                                backgroundColor: "#020617",
-                                color: "#e5e7eb",
-                              }}
-                              placeholder="DKMV 웹에서 발급한 VS Code 토큰"
-                              value={tokenInput}
-                              onChange={(e) => setTokenInput(e.target.value)}
-                            />
-                            <button
-                              type="button"
-                              onClick={handleSubmitToken}
-                              disabled={isSettingToken}
-                              style={{
-                                padding: "8px 16px",
-                                borderRadius: 10,
-                                border: "1px solid rgba(129,140,248,0.95)",
-                                background:
-                                  "linear-gradient(90deg,rgba(79,70,229,1),rgba(129,140,248,1))",
-                                color: "#f9fafb",
-                                cursor: isSettingToken ? "default" : "pointer",
-                                opacity: isSettingToken ? 0.78 : 1,
-                                fontWeight: 700,
-                              }}
-                            >
-                              <Key size={14} style={{ marginRight: 6 }} />
-                              {isSettingToken ? "확인 중..." : "확인"}
-                            </button>
-                          </div>
-
-                          {tokenError && (
-                            <div
-                              style={{
-                                marginTop: 10,
-                                color: "#fca5a5",
-                                fontSize: 12,
-                              }}
-                            >
-                              {tokenError}
-                            </div>
-                          )}
-                        </div>
-
-                        <div
-                          style={{
-                            padding: 12,
-                            fontSize: 11,
-                            color: "#9ca3af",
-                          }}
-                        >
-                          <Shield size={11} style={{ marginRight: 6 }} />
-                          토큰은 이 VS Code 환경에만 저장됩니다.
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <TokenAuthCard
+                  isAuthenticated={isAuthenticated}
+                  authUser={authUser}
+                  tokenInput={tokenInput}
+                  onChangeToken={setTokenInput}
+                  tokenError={tokenError}
+                  isSettingToken={isSettingToken}
+                  isBusy={isBusy}
+                  onOpenTokenPage={handleOpenTokenPage}
+                  onSubmitToken={handleSubmitToken}
+                  onLogout={handleLogoutClick}
+                />
               </section>
             )}
 

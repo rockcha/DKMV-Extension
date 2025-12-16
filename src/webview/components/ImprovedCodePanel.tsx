@@ -8,8 +8,9 @@ type Props = {
   originalCode: string;
   improvedCode: string | null;
 
-  onApplyToSelection?: () => void;
-  onApplyToFile?: () => void;
+  // ✅ 정리된 코드가 그대로 적용되도록 "code 인자"를 받게 변경
+  onApplyToSelection?: (code: string) => void;
+  onApplyToFile?: (code: string) => void;
 
   logoSrc: string;
 };
@@ -22,12 +23,14 @@ function sanitizeLLMCode(raw: string): string {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return "";
 
+  // 1) JSON string 으로 감싸져 오는 케이스:  "...\n..."
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
     try {
       const parsed = JSON.parse(trimmed);
       if (typeof parsed === "string") return parsed;
     } catch {}
 
+    // 2) JSON.parse 실패 시: 바깥 따옴표 1겹만 제거 + escape 복구
     const inner = trimmed.slice(1, -1);
     return inner
       .replace(/\\"/g, '"')
@@ -101,6 +104,41 @@ export default function ImprovedCodePanel({
       console.warn("[DKMV] clipboard copy failed:", e);
       setCopied(false);
     }
+  };
+
+  // ✅ 적용에 쓸 "정리된 코드" 단일 소스
+  const applyCode = normalizedImproved ?? "";
+
+  /* =========================
+     ✅ CodePanel의 "보라색 점 + 헤더" 스타일 이식
+  ========================== */
+  const statusDotColor = (() => {
+    if (isImproving) return "#c4b5fd";
+    if (copied) return "#86efac"; // 복사 완료 피드백(원하면 #a855f7로 고정해도 OK)
+    return "#a855f7";
+  })();
+
+  const dotStyle: React.CSSProperties = {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: statusDotColor,
+    boxShadow: "0 0 0 3px rgba(168,85,247,0.12)",
+    flex: "0 0 auto",
+  };
+
+  const headerRowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    userSelect: "none",
+  };
+
+  const headerTitleStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 950,
+    color: "rgba(255,255,255,0.80)",
+    letterSpacing: "-0.01em",
   };
 
   return (
@@ -209,16 +247,17 @@ export default function ImprovedCodePanel({
                   minHeight: 0,
                 }}
               >
+                {/* ✅ 헤더(보라점 적용) */}
                 <div
                   style={{
                     padding: "8px 10px",
-                    fontSize: 11,
-                    fontWeight: 900,
-                    color: "rgba(255,255,255,0.75)",
                     borderBottom: "1px solid rgba(148,163,184,0.16)",
                   }}
                 >
-                  원문 코드
+                  <div style={headerRowStyle}>
+                    <span style={dotStyle} />
+                    <div style={headerTitleStyle}>원문 코드</div>
+                  </div>
                 </div>
 
                 <pre
@@ -260,7 +299,7 @@ export default function ImprovedCodePanel({
                   transition: "border-color 180ms ease, background 180ms ease",
                 }}
               >
-                {/* ✅ 헤더 + 우상단 복사 버튼 */}
+                {/* ✅ 헤더 + 우상단 복사 버튼 (보라점 적용) */}
                 <div
                   style={{
                     padding: "8px 10px",
@@ -271,14 +310,9 @@ export default function ImprovedCodePanel({
                     borderBottom: "1px solid rgba(148,163,184,0.16)",
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 950,
-                      color: "rgba(255,255,255,0.80)",
-                    }}
-                  >
-                    개선 코드
+                  <div style={headerRowStyle}>
+                    <span style={dotStyle} />
+                    <div style={headerTitleStyle}>개선 코드</div>
                   </div>
 
                   <button
@@ -359,7 +393,7 @@ export default function ImprovedCodePanel({
             >
               <button
                 type="button"
-                onClick={onApplyToSelection}
+                onClick={() => onApplyToSelection?.(applyCode)}
                 disabled={!canApply || !onApplyToSelection}
                 className="dkmv-apply-btn"
                 title={
@@ -374,7 +408,7 @@ export default function ImprovedCodePanel({
 
               <button
                 type="button"
-                onClick={onApplyToFile}
+                onClick={() => onApplyToFile?.(applyCode)}
                 disabled={!canApply || !onApplyToFile}
                 className="dkmv-apply-btn"
                 title={

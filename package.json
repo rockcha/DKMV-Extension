@@ -1,15 +1,26 @@
 {
   "name": "dkmv-extension",
   "displayName": "DKMV Analyzer",
-  "description": "Analyze selected code with DKMV (skeleton)",
-  "version": "0.0.1",
-  "publisher": "your-name-or-id",
-  "private": true,
+  "description": "AI code review & improvement inside VS Code (DKMV).",
+  "version": "0.0.3",
+  "publisher": "TBADKMV",
+  "license": "MIT",
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.106.0"
   },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "code-review",
+    "refactor",
+    "vscode-extension"
+  ],
+  "icon": "media/logo.png",
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:dkmv.analyzeSelection"
   ],
   "contributes": {
@@ -20,14 +31,31 @@
       }
     ]
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<owner>/<repo>.git"
+  },
+  "bugs": {
+    "url": "https://github.com/<owner>/<repo>/issues"
+  },
+  "homepage": "https://github.com/<owner>/<repo>#readme",
   "scripts": {
     "dev": "vite",
     "build:extension": "tsc -p tsconfig.extension.json",
     "build:webview": "vite build",
     "build": "npm run build:extension && npm run build:webview",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('media/webview',{recursive:true,force:true});\"",
+    "vsix:package": "npm run build && vsce package --no-dependencies",
+    "vsix:publish": "npm run build && vsce publish"
   },
+  "files": [
+    "dist/**",
+    "media/**",
+    "package.json",
+    "README.md"
+  ],
   "dependencies": {
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",
@@ -40,6 +68,7 @@
     "@types/react-dom": "^19.2.2",
     "@types/vscode": "^1.106.0",
     "@vitejs/plugin-react": "^5.1.0",
+    "@vscode/vsce": "^2.26.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

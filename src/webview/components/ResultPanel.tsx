@@ -1,8 +1,7 @@
 // src/webview/components/ResultPanel.tsx
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import type { CSSProperties } from "react";
-import SectionHeader from "./SectionHeader";
 import type {
   AnalyzerResult,
   ScoreCategories,
@@ -87,24 +86,18 @@ const handleCopyJson = (data: any) => {
 const renderJsonTree = (value: any, depth = 0): JSX.Element => {
   const indent = depth * 12;
 
-  if (value === null) {
-    return <span style={{ color: "#6b7280" }}>null</span>;
-  }
+  if (value === null) return <span style={{ color: "#6b7280" }}>null</span>;
 
   const type = typeof value;
 
-  if (type === "string") {
+  if (type === "string")
     return <span style={{ color: "#a7f3d0" }}>"{value}"</span>;
-  }
-
-  if (type === "number" || type === "boolean") {
+  if (type === "number" || type === "boolean")
     return <span style={{ color: "#fde68a" }}>{String(value)}</span>;
-  }
 
   if (Array.isArray(value)) {
-    if (value.length === 0) {
+    if (value.length === 0)
       return <span style={{ color: "#6b7280" }}>[ ]</span>;
-    }
     return (
       <div style={{ marginLeft: indent }}>
         {value.map((item, idx) => (
@@ -119,9 +112,8 @@ const renderJsonTree = (value: any, depth = 0): JSX.Element => {
 
   if (type === "object") {
     const entries = Object.entries(value as Record<string, any>);
-    if (entries.length === 0) {
+    if (entries.length === 0)
       return <span style={{ color: "#6b7280" }}>{"{ }"}</span>;
-    }
     return (
       <div style={{ marginLeft: indent }}>
         {entries.map(([key, val]) => (
@@ -139,34 +131,25 @@ const renderJsonTree = (value: any, depth = 0): JSX.Element => {
 };
 
 const LOADING_MESSAGES = [
-  // 코드 분석
   "코드 구조를 분석하는 중...",
   "로직 흐름을 파악하는 중...",
   "함수 및 모듈 간 의존성을 점검하는 중...",
   "복잡도가 높은 구간을 찾는 중...",
   "에러 가능성이 있는 분기들을 살펴보는 중...",
-
-  // LLM / AI 모델
   "LLM에게 코드 컨텍스트를 전달하는 중...",
   "모델이 코드 패턴을 해석하는 중...",
   "AI 리뷰어가 제안할 수정 포인트를 정리하는 중...",
   "프롬프트와 응답 형식을 정렬하는 중...",
   "모델이 품질 점수를 계산하는 중...",
-
-  // DB / 백엔드
   "데이터베이스 스키마와 사용 패턴을 살펴보는 중...",
   "쿼리 사용 방식에 잠재적인 이슈가 없는지 확인하는 중...",
   "트랜잭션 및 예외 처리 흐름을 검토하는 중...",
   "API 호출과 응답 처리 방식을 점검하는 중...",
-
-  // 프론트엔드 / UI
   "상태 관리와 렌더링 흐름을 분석하는 중...",
   "컴포넌트 분리와 재사용 가능성을 확인하는 중...",
   "비동기 처리와 로딩 상태 핸들링을 검토하는 중...",
   "폼 검증 및 에러 메시지 처리를 점검하는 중...",
   "UI/UX 측면에서 개선 여지를 확인하는 중...",
-
-  // 종합 리뷰
   "버그, 유지보수성, 스타일, 보안 관점에서 코드를 종합 평가하는 중...",
   "리뷰 코멘트를 정리하는 중...",
   "권장 리팩토링 포인트를 정돈하는 중...",
@@ -192,14 +175,12 @@ const ResultPanel: React.FC<Props> = ({
   displayOverallScore,
   displayCategoryScores,
   logoSrc,
-
   rawResponseText,
 }) => {
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
   const [isNarrow, setIsNarrow] = useState(false);
   const [hasMounted, setHasMounted] = useState(false);
 
-  // ✅ 어떤 버튼이 복사되었는지 상태
   const [copiedTarget, setCopiedTarget] = useState<
     "summary" | "comments" | "json" | null
   >(null);
@@ -213,8 +194,7 @@ const ResultPanel: React.FC<Props> = ({
 
   const overallLabel = getScoreLabel(displayOverallScore);
 
-  // summary / review_summary
-  const reviewText: string | null = (() => {
+  const reviewText: string | null = useMemo(() => {
     if (!resultData) return null;
     const v = (resultData as any).review_summary ?? (resultData as any).summary;
     if (!v) return null;
@@ -224,14 +204,13 @@ const ResultPanel: React.FC<Props> = ({
     } catch {
       return String(v);
     }
-  })();
+  }, [resultData]);
 
   const { categoryComments }: { categoryComments: CategoryComment[] } =
     normalizeReviewDetails(resultData as AnalyzerResult | null);
 
   const clampedOverall = Math.max(0, Math.min(100, displayOverallScore));
 
-  // 🔁 overall 점수 → grade 키
   const overallGrade: OverallGrade =
     clampedOverall >= 90
       ? "excellent"
@@ -243,18 +222,15 @@ const ResultPanel: React.FC<Props> = ({
       ? "needsWork"
       : "poor";
 
-  // 🔁 전역에서 배지 이미지, not_found 이미지 가져오기
   const badgeMap = window.__DKMV_BADGES__ ?? {};
   const notFoundImageSrc = window.__DKMV_NOT_FOUND__ ?? "/not_found.png";
 
-  // ✅ 5개 등급 모두에 대해 이미지 매핑
   const gradeImages = GRADE_ORDER.map((key) => ({
     key,
     label: GRADE_LABELS[key],
     src: badgeMap[key] ?? null,
-  })).filter((g) => g.src); // 이미지 없는 등급은 제외
+  })).filter((g) => g.src);
 
-  // 로딩 문구 순차 변경
   useEffect(() => {
     if (!isLoading) return;
     setLoadingTextIndex(0);
@@ -264,26 +240,20 @@ const ResultPanel: React.FC<Props> = ({
     return () => window.clearInterval(id);
   }, [isLoading]);
 
-  // 반응형 컬럼 전환
   useEffect(() => {
-    const handleResize = () => {
-      setIsNarrow(window.innerWidth < 900);
-    };
+    const handleResize = () => setIsNarrow(window.innerWidth < 900);
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // 전체 패널 페이드 인
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
+  useEffect(() => setHasMounted(true), []);
 
   const scoreColorByKey: Record<keyof ScoreCategories, string> = {
-    bug: "#fb923c", // orange
-    maintainability: "#22c55e", // green
-    style: "#38bdf8", // sky
-    security: "#facc15", // amber
+    bug: "#fb923c",
+    maintainability: "#22c55e",
+    style: "#38bdf8",
+    security: "#facc15",
   };
 
   const scoreBgByKey: Record<keyof ScoreCategories, string> = {
@@ -295,11 +265,7 @@ const ResultPanel: React.FC<Props> = ({
 
   const categoryConfig = [
     { key: "bug" as const, label: "Bug", icon: Bug },
-    {
-      key: "maintainability" as const,
-      label: "Maintainability",
-      icon: Wrench,
-    },
+    { key: "maintainability" as const, label: "Maintainability", icon: Wrench },
     { key: "style" as const, label: "Style", icon: Palette },
     { key: "security" as const, label: "Security", icon: Shield },
   ];
@@ -307,21 +273,90 @@ const ResultPanel: React.FC<Props> = ({
   const hasAnyComment = categoryComments.some(
     (c) => c.text && c.text.trim().length > 0
   );
-
   const showEmptyState = !resultData && !isLoading;
 
-  // 코멘트 전체 복사용 텍스트
-  const combinedCommentsText = (() => {
+  const combinedCommentsText = useMemo(() => {
     if (!hasAnyComment) return "";
     return categoryComments
       .filter((c) => c.text && c.text.trim().length > 0)
       .map((c) => `[#${c.label}] ${c.text.trim()}`)
       .join("\n\n");
+  }, [categoryComments, hasAnyComment]);
+
+  // ✅ CodePanel처럼: 섹션 헤더(보라색 점 + 타이틀) 공통화
+  const statusDotColor = (() => {
+    if (isError) return "#fca5a5";
+    if (isLoading) return "#c4b5fd";
+    if (resultHighlight) return "#a855f7";
+    return "#a855f7";
   })();
+
+  const titleRowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "2px 2px 8px 2px",
+    userSelect: "none",
+  };
+
+  const titleLeftStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+  };
+
+  const dotStyle: React.CSSProperties = {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: statusDotColor,
+    boxShadow: "0 0 0 3px rgba(168,85,247,0.12)",
+    flex: "0 0 auto",
+  };
+
+  const titleTextStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#e5e7eb",
+    letterSpacing: "-0.01em",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+
+  const renderTitleRow = (label: string, right?: React.ReactNode) => {
+    return (
+      <div style={titleRowStyle}>
+        <div style={titleLeftStyle}>
+          <span style={dotStyle} />
+          <div style={titleTextStyle} title={label}>
+            {label}
+          </div>
+        </div>
+        {right ? <div style={{ flex: "0 0 auto" }}>{right}</div> : null}
+      </div>
+    );
+  };
+
+  const iconBtnStyle: React.CSSProperties = {
+    width: 22,
+    height: 22,
+    borderRadius: 999,
+    border: "1px solid rgba(55,65,81,0.9)",
+    backgroundColor: "rgba(15,23,42,0.9)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+    transition:
+      "background-color 0.15s ease-out, border-color 0.15s ease-out, transform 0.1s ease-out",
+  };
 
   return (
     <>
-      {/* 로딩 애니메이션용 keyframes 정의 */}
       <style>
         {`
           @keyframes dkmv-spinner-ring {
@@ -338,13 +373,12 @@ const ResultPanel: React.FC<Props> = ({
           minHeight: 0,
           borderRadius: 10,
           border: "none",
-          background:
-            "radial-gradient(circle at top, rgba(30,64,175,0.25), transparent 60%), #020617",
-
+          background: "transparent",
           position: "relative",
           overflow: "hidden",
           height: "100%",
           minHeight: "calc(100vh - 160px)",
+
           boxSizing: "border-box",
           opacity: hasMounted ? 1 : 0,
           transform: hasMounted ? "translateY(0)" : "translateY(6px)",
@@ -395,7 +429,6 @@ const ResultPanel: React.FC<Props> = ({
             </div>
           )}
 
-          {/* 실제 내용 (로딩 시 blur) */}
           <div
             style={{
               flex: 1,
@@ -407,7 +440,6 @@ const ResultPanel: React.FC<Props> = ({
               transition: "filter 0.2s ease-out, opacity 0.2s ease-out",
             }}
           >
-            {/* 메인 레이아웃: 좌(점수/요약) / 우(코멘트/JSON) */}
             <div
               style={{
                 display: "flex",
@@ -419,7 +451,6 @@ const ResultPanel: React.FC<Props> = ({
               }}
             >
               {showEmptyState ? (
-                // ✅ 결과 없음: 전체 폭 사용 + 카드 maxWidth 제한
                 <div
                   style={{
                     flex: 1,
@@ -436,8 +467,7 @@ const ResultPanel: React.FC<Props> = ({
                       justifyContent: "center",
                       gap: 12,
                       width: "100%",
-                      maxWidth: 480, // 너무 넓어지지 않게
-                      minHeight: 220,
+                      height: "calc(100vh - 200px)",
                     }}
                   >
                     <img
@@ -460,20 +490,6 @@ const ResultPanel: React.FC<Props> = ({
                     >
                       아직 분석 결과가 없어요
                     </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#9ca3af",
-                        lineHeight: 1.5,
-                        textAlign: "center",
-                        whiteSpace: "pre-wrap",
-                      }}
-                    >
-                      왼쪽 패널에 코드를 붙여 넣고{"\n"}
-                      <span style={{ color: "#c4b5fd" }}>“분석하기”</span>를
-                      눌러보면{"\n"}
-                      이곳에 결과가 표시됩니다.
-                    </div>
                   </div>
                 </div>
               ) : (
@@ -491,67 +507,9 @@ const ResultPanel: React.FC<Props> = ({
                   >
                     {/* 전체 점수 + 등급 이미지 스케일 */}
                     <div style={baseCardStyle}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                          gap: 8,
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <SectionHeader label="전체 품질 점수" />
-                          {resultData ? (
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontFamily:
-                                    "ui-monospace, SFMono-Regular, Menlo, Monaco",
-                                  fontSize: 30,
-                                  fontWeight: 800,
-                                  transition:
-                                    "transform 0.18s ease-out, color 0.18s ease-out",
-                                }}
-                              >
-                                {clampedOverall}
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: 13,
-                                  color: "#9ca3af",
-                                }}
-                              >
-                                /100
-                              </span>
-                            </div>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: 11,
-                                color: "#6b7280",
-                              }}
-                            >
-                              아직 분석 결과가 없습니다. 코드를 분석하면
-                              여기에서 점수를 확인할 수 있어요.
-                            </span>
-                          )}
-                        </div>
-
-                        {/* 점수 레이블 텍스트 뱃지 (텍스트만 유지) */}
-                        {resultData && (
+                      {renderTitleRow(
+                        "전체 품질 점수",
+                        resultData ? (
                           <span
                             style={{
                               fontSize: 10,
@@ -571,10 +529,40 @@ const ResultPanel: React.FC<Props> = ({
                           >
                             {overallLabel.label}
                           </span>
-                        )}
-                      </div>
+                        ) : null
+                      )}
 
-                      {/* ✅ Poor ~ Excellent 이미지 5개: 현재만 컬러, 나머지는 흑백 */}
+                      {resultData ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontFamily:
+                                "ui-monospace, SFMono-Regular, Menlo, Monaco",
+                              fontSize: 30,
+                              fontWeight: 800,
+                              transition:
+                                "transform 0.18s ease-out, color 0.18s ease-out",
+                            }}
+                          >
+                            {clampedOverall}
+                          </span>
+                          <span style={{ fontSize: 13, color: "#9ca3af" }}>
+                            /100
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 11, color: "#6b7280" }}>
+                          아직 분석 결과가 없습니다. 코드를 분석하면 여기에서
+                          점수를 확인할 수 있어요.
+                        </span>
+                      )}
+
                       {resultData && gradeImages.length > 0 && (
                         <div
                           style={{
@@ -587,7 +575,6 @@ const ResultPanel: React.FC<Props> = ({
                         >
                           {gradeImages.map((grade) => {
                             const isActive = grade.key === overallGrade;
-
                             return (
                               <div
                                 key={grade.key}
@@ -642,19 +629,6 @@ const ResultPanel: React.FC<Props> = ({
                                     }}
                                   />
                                 </div>
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    color: isActive ? "#e5e7eb" : "#6b7280",
-                                    fontWeight: isActive ? 600 : 500,
-                                    textTransform: "uppercase",
-                                    letterSpacing: 0.3,
-                                    textAlign: "center",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {grade.label}
-                                </span>
                               </div>
                             );
                           })}
@@ -669,36 +643,16 @@ const ResultPanel: React.FC<Props> = ({
                         backgroundColor: "rgba(15,23,42,0.98)",
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <SectionHeader label="리뷰 요약" />
-                        {reviewText && (
+                      {renderTitleRow(
+                        "리뷰 요약",
+                        reviewText ? (
                           <button
                             type="button"
                             onClick={() => {
                               handleCopyText(reviewText);
                               triggerCopied("summary");
                             }}
-                            style={{
-                              width: 22,
-                              height: 22,
-                              borderRadius: 999,
-                              border: "1px solid rgba(55,65,81,0.9)",
-                              backgroundColor: "rgba(15,23,42,0.9)",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
-                              padding: 0,
-                              transition:
-                                "background-color 0.15s ease-out, border-color 0.15s ease-out, transform 0.1s ease-out",
-                            }}
+                            style={iconBtnStyle}
                             title="리뷰 요약 복사"
                           >
                             {copiedTarget === "summary" ? (
@@ -707,8 +661,9 @@ const ResultPanel: React.FC<Props> = ({
                               <Copy size={12} color="#9ca3af" />
                             )}
                           </button>
-                        )}
-                      </div>
+                        ) : null
+                      )}
+
                       <div
                         style={{
                           fontSize: 11,
@@ -737,7 +692,7 @@ const ResultPanel: React.FC<Props> = ({
                             "linear-gradient(145deg, rgba(15,23,42,1), rgba(30,64,175,0.35))",
                         }}
                       >
-                        <SectionHeader label="유형별 점수" />
+                        {renderTitleRow("유형별 점수")}
                         <div
                           style={{
                             display: "grid",
@@ -801,15 +756,13 @@ const ResultPanel: React.FC<Props> = ({
                                       <Icon size={16} color={scoreColor} />
                                     </div>
                                     <span
-                                      style={{
-                                        fontSize: 11,
-                                        color: "#e5e7eb",
-                                      }}
+                                      style={{ fontSize: 11, color: "#e5e7eb" }}
                                     >
                                       {label}
                                     </span>
                                   </div>
                                 </div>
+
                                 <div
                                   style={{
                                     marginTop: 4,
@@ -830,10 +783,7 @@ const ResultPanel: React.FC<Props> = ({
                                     {Math.max(0, Math.min(100, value))}
                                   </span>
                                   <span
-                                    style={{
-                                      fontSize: 10,
-                                      color: "#9ca3af",
-                                    }}
+                                    style={{ fontSize: 10, color: "#9ca3af" }}
                                   >
                                     /100
                                   </span>
@@ -865,36 +815,16 @@ const ResultPanel: React.FC<Props> = ({
                           backgroundColor: "rgba(15,23,42,0.98)",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
-                          <SectionHeader label="유형별 코멘트" />
-                          {combinedCommentsText && (
+                        {renderTitleRow(
+                          "유형별 코멘트",
+                          combinedCommentsText ? (
                             <button
                               type="button"
                               onClick={() => {
                                 handleCopyText(combinedCommentsText);
                                 triggerCopied("comments");
                               }}
-                              style={{
-                                width: 22,
-                                height: 22,
-                                borderRadius: 999,
-                                border: "1px solid rgba(55,65,81,0.9)",
-                                backgroundColor: "rgba(15,23,42,0.9)",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                                padding: 0,
-                                transition:
-                                  "background-color 0.15s ease-out, border-color 0.15s ease-out, transform 0.1s ease-out",
-                              }}
+                              style={iconBtnStyle}
                               title="유형별 코멘트 전체 복사"
                             >
                               {copiedTarget === "comments" ? (
@@ -903,8 +833,8 @@ const ResultPanel: React.FC<Props> = ({
                                 <Copy size={12} color="#9ca3af" />
                               )}
                             </button>
-                          )}
-                        </div>
+                          ) : null
+                        )}
 
                         <div
                           style={{
@@ -980,6 +910,7 @@ const ResultPanel: React.FC<Props> = ({
                                     </span>
                                   </div>
                                 </div>
+
                                 <p
                                   style={{
                                     fontSize: 11,
@@ -997,7 +928,7 @@ const ResultPanel: React.FC<Props> = ({
                       </div>
                     )}
 
-                    {/* 파싱된 JSON (항상 펼쳐짐) */}
+                    {/* 파싱된 JSON */}
                     {resultData && (
                       <div
                         style={{
@@ -1005,39 +936,17 @@ const ResultPanel: React.FC<Props> = ({
                           backgroundColor: "rgba(15,23,42,0.98)",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
-                          <SectionHeader label="파싱된 JSON" />
+                        {renderTitleRow(
+                          "파싱된 JSON",
                           <button
                             type="button"
                             onClick={() => {
-                              if (rawResponseText) {
+                              if (rawResponseText)
                                 handleCopyText(rawResponseText);
-                              } else {
-                                handleCopyJson(resultData);
-                              }
+                              else handleCopyJson(resultData);
                               triggerCopied("json");
                             }}
-                            style={{
-                              width: 22,
-                              height: 22,
-                              borderRadius: 999,
-                              border: "1px solid rgba(55,65,81,0.9)",
-                              backgroundColor: "rgba(15,23,42,0.9)",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
-                              padding: 0,
-                              transition:
-                                "background-color 0.15s ease-out, border-color 0.15s ease-out, transform 0.1s ease-out",
-                            }}
+                            style={iconBtnStyle}
                             title="JSON 복사"
                           >
                             {copiedTarget === "json" ? (
@@ -1046,7 +955,7 @@ const ResultPanel: React.FC<Props> = ({
                               <Copy size={12} color="#9ca3af" />
                             )}
                           </button>
-                        </div>
+                        )}
 
                         <div
                           style={{
@@ -1057,9 +966,9 @@ const ResultPanel: React.FC<Props> = ({
                             color: "#d1d5db",
                             overflow: "auto",
                             whiteSpace: "pre-wrap",
-                            borderRadius: 4,
+                            borderRadius: 8,
                             border: "1px solid rgba(55,65,81,0.9)",
-                            padding: 6,
+                            padding: 8,
                             backgroundColor: "#020617",
                             maxHeight: 200,
                           }}
@@ -1074,7 +983,7 @@ const ResultPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* 로딩 오버레이 - 🔁 스피너만 남김 */}
+          {/* 로딩 오버레이 */}
           {isLoading && (
             <div
               style={{
@@ -1100,7 +1009,6 @@ const ResultPanel: React.FC<Props> = ({
                   justifyContent: "center",
                 }}
               >
-                {/* 회전하는 링 */}
                 <div
                   style={{
                     position: "absolute",
@@ -1112,7 +1020,6 @@ const ResultPanel: React.FC<Props> = ({
                     animation: "dkmv-spinner-ring 1.0s linear infinite",
                   }}
                 />
-                {/* 로고 */}
                 <img
                   src={logoSrc}
                   alt="Loading..."
@@ -1124,13 +1031,7 @@ const ResultPanel: React.FC<Props> = ({
                   }}
                 />
               </div>
-              <span
-                style={{
-                  fontSize: 14,
-                  color: "#e5e7eb",
-                  fontWeight: 600,
-                }}
-              >
+              <span style={{ fontSize: 14, color: "#e5e7eb", fontWeight: 600 }}>
                 {LOADING_MESSAGES[loadingTextIndex]}
               </span>
             </div>

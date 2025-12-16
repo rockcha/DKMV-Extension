@@ -1,6 +1,6 @@
 // src/webview/components/CodePanel.tsx
-import React, { useState } from "react";
-import { FileText, MousePointer2 } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Bot, FileText, MousePointer2 } from "lucide-react";
 import ModelSelector from "./ModelSelector";
 
 type Mode = "selection" | "document" | null;
@@ -44,14 +44,15 @@ const CodePanel: React.FC<Props> = ({
   onPickSelection,
   isPickingSelection,
 }) => {
-  const lineCount = code ? code.split(/\r\n|\r|\n/).length : 0;
+  const lineCount = useMemo(() => {
+    return code ? code.split(/\r\n|\r|\n/).length : 0;
+  }, [code]);
+
   const charCount = code.length;
 
   const [isPickHover, setIsPickHover] = useState(false);
   const [isDragHover, setIsDragHover] = useState(false);
 
-  // ✅ 요구사항: 파일선택 모드가 아니면 텍스트 고정 "파일 선택"
-  // (파일을 선택해도 "현재 파일: ~" 같은 표시는 하지 않음)
   const pickLabel = "파일 선택";
 
   const pickDisabled = isLoading || isPickingFile || isPickingSelection;
@@ -60,11 +61,65 @@ const CodePanel: React.FC<Props> = ({
   const isFileMode = mode === "document";
   const isSelectionMode = mode === "selection";
 
+  const statusDotColor = (() => {
+    if (modelError) return "#fca5a5";
+    if (isLoading || isPickingFile || isPickingSelection) return "#c4b5fd";
+    return "#a855f7";
+  })();
+
+  /** ✅ ResultPanel처럼: 전체 섹션에 남색 배경(살짝) */
+  const panelBg =
+    "radial-gradient(circle at 20% 10%, rgba(30,41,59,0.55), rgba(2,6,23,0.35))";
+
+  /** ✅ 각 섹션 카드도 살짝 남색 틴트 */
+  const sectionCardBg =
+    "linear-gradient(135deg, rgba(15,23,42,0.55), rgba(2,6,23,0.35))";
+
+  const sectionWrapStyle: React.CSSProperties = {
+    borderRadius: 12,
+    border: "1px solid rgba(148,163,184,0.14)",
+    background: sectionCardBg,
+    padding: 10,
+    boxSizing: "border-box",
+    boxShadow:
+      "0 10px 24px rgba(2,6,23,0.45), inset 0 0 0 1px rgba(2,6,23,0.25)",
+  };
+
+  const sectionHeaderStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "2px 2px 8px 2px",
+    userSelect: "none",
+  };
+
+  const dotStyle: React.CSSProperties = {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: statusDotColor,
+    boxShadow: "0 0 0 3px rgba(168,85,247,0.12)",
+    flex: "0 0 auto",
+  };
+
+  const headerTitleStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#e5e7eb",
+    letterSpacing: "-0.01em",
+  };
+
+  const subHintStyle: React.CSSProperties = {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.45)",
+    lineHeight: 1.4,
+  };
+
   const baseBtnStyle: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
     gap: 6,
-    padding: "6px 10px",
+    padding: "7px 10px",
     borderRadius: 10,
     border: "1px solid rgba(75,85,99,0.9)",
     color: "#e5e7eb",
@@ -75,44 +130,94 @@ const CodePanel: React.FC<Props> = ({
     transition: "background-color 0.15s ease, border-color 0.15s ease",
   };
 
-  const activeBg = "rgba(168,85,247,0.92)"; // 보라색 활성
+  const activeBg = "rgba(168,85,247,0.92)";
   const idleBgHover = "rgba(15,23,42,0.85)";
   const idleBg = "rgba(2,6,23,0.65)";
+
+  const readOnlyInputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "9px 10px",
+    borderRadius: 10,
+    border: modelError
+      ? "1px solid rgba(252,165,165,0.95)"
+      : "1px solid rgba(75,85,99,0.9)",
+    backgroundColor: "#020617",
+    color: "#e5e7eb",
+    fontSize: 12,
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const textareaStyle: React.CSSProperties = {
+    width: "100%",
+    resize: "none",
+    fontFamily: "JetBrains Mono, Consolas, monospace",
+    fontSize: 12,
+    lineHeight: 1.55,
+    padding: 10,
+    borderRadius: 10,
+    border: codeHighlight
+      ? "1px solid rgba(168,85,247,0.95)"
+      : "1px solid rgba(75,85,99,0.9)",
+    boxSizing: "border-box",
+    backgroundColor: "#020617",
+    color: "#e5e7eb",
+    outline: "none",
+    transition: "border-color 0.18s ease-out",
+    minHeight: 260,
+  };
 
   return (
     <section
       style={{
         display: "flex",
         flexDirection: "column",
-        borderRadius: 10,
-        border: "none",
-        background:
-          "radial-gradient(circle at top, rgba(37,99,235,0.18), transparent 60%), #020617",
+        borderRadius: 12,
+        border: "1px solid rgba(55,65,81,0.55)",
+        background: panelBg, // ✅ 남색 배경 적용
         padding: 10,
         minHeight: "calc(100vh - 190px)",
         boxSizing: "border-box",
+        gap: 10,
+        boxShadow: "0 12px 26px rgba(2,6,23,0.55)",
       }}
     >
-      {/* 상단: 파일 선택 + 드래그 선택 + 모델 */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 10,
-          marginBottom: 8,
-          flexWrap: "wrap",
-        }}
-      >
+      {/* =========================
+          1) 사용한 모델 선택
+      ========================== */}
+      <div style={sectionWrapStyle}>
+        <div style={sectionHeaderStyle}>
+          <span style={dotStyle} />
+          <div style={headerTitleStyle}>사용한 모델 선택</div>
+        </div>
+
+        <div style={{ marginTop: 8 }}>
+          <ModelSelector
+            value={selectedModel}
+            onChange={onChangeModel}
+            hasError={modelError}
+          />
+        </div>
+      </div>
+
+      {/* =========================
+          2) 코드 선택
+      ========================== */}
+      <div style={{ ...sectionWrapStyle, flex: 1, minHeight: 0 }}>
+        <div style={sectionHeaderStyle}>
+          <span style={dotStyle} />
+          <div style={headerTitleStyle}>코드 선택</div>
+        </div>
+
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
             flexWrap: "wrap",
+            marginBottom: 10,
           }}
         >
-          {/* 파일 선택 */}
           <button
             type="button"
             onClick={onPickFile}
@@ -138,7 +243,6 @@ const CodePanel: React.FC<Props> = ({
             <span>{isPickingFile ? "파일 여는 중..." : pickLabel}</span>
           </button>
 
-          {/* 드래그 선택 */}
           <button
             type="button"
             onClick={onPickSelection}
@@ -163,74 +267,31 @@ const CodePanel: React.FC<Props> = ({
             <MousePointer2 size={14} />
             <span>{isPickingSelection ? "가져오는 중..." : "드래그 선택"}</span>
           </button>
-
-          {/* 현재 모드 힌트 */}
-          <span
-            style={{
-              fontSize: 10,
-              color: "rgba(255,255,255,0.45)",
-              paddingTop: 2,
-              userSelect: "none",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {mode === "selection"
-              ? "• 선택영역 모드"
-              : mode === "document"
-              ? "• 파일전체 모드"
-              : ""}
-          </span>
         </div>
 
-        <ModelSelector
-          value={selectedModel}
-          onChange={onChangeModel}
-          hasError={modelError}
+        <textarea
+          value={code}
+          onChange={(e) => onChangeCode(e.target.value)}
+          onKeyDown={onCodeKeyDown}
+          placeholder="VS Code에서 코드를 선택 후 명령을 실행하거나, 이곳에 분석할 코드를 붙여넣어 주세요."
+          style={textareaStyle}
         />
-      </div>
 
-      {/* 코드 입력 */}
-      <textarea
-        value={code}
-        onChange={(e) => onChangeCode(e.target.value)}
-        onKeyDown={onCodeKeyDown}
-        placeholder="VS Code에서 코드를 선택 후 명령을 실행하거나, 이곳에 분석할 코드를 붙여넣어 주세요."
-        style={{
-          flex: 1,
-          width: "100%",
-          resize: "none",
-          fontFamily: "JetBrains Mono, Consolas, monospace",
-          fontSize: 12,
-          lineHeight: 1.5,
-          padding: 10,
-          borderRadius: 6,
-          border: codeHighlight
-            ? "1px solid rgba(168,85,247,0.95)"
-            : "1px solid rgba(75,85,99,0.9)",
-          boxSizing: "border-box",
-          backgroundColor: "#020617",
-          color: "#e5e7eb",
-          outline: "none",
-          transition: "border-color 0.18s ease-out",
-          minHeight: "220px",
-        }}
-      />
-
-      {/* 하단 */}
-      <div
-        style={{
-          marginTop: 6,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          fontSize: 10,
-          color: "#6b7280",
-        }}
-      >
-        <span>
-          {lineCount} lines · {charCount} chars
-        </span>
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            fontSize: 10,
+            color: "#6b7280",
+          }}
+        >
+          <span>
+            {lineCount} lines · {charCount} chars
+          </span>
+        </div>
       </div>
     </section>
   );

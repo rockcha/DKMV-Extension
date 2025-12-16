@@ -1,49 +1,52 @@
 // src/webview/ui/appStyles.ts
-
 export const appStyleText = `
   /* ---------------------------
-    Base / Font
+    Design tokens
   --------------------------- */
   :root {
-    --font-kr: "Gowun Dodum", "Noto Sans KR", "Apple SD Gothic Neo", "Segoe UI",
-      Arial, sans-serif;
+    --font-kr: "Gowun Dodum", "Noto Sans KR", "Apple SD Gothic Neo", "Segoe UI", Arial, sans-serif;
 
     --bg: #020617;
     --bg2: #030712;
-    --panel: rgba(2,6,23,0.35);
-    --panel2: rgba(15,23,42,0.55);
-    --line: rgba(31,41,55,0.9);
 
-    --text: #e5e7eb;
-    --muted: #9ca3af;
+    --text: rgba(255,255,255,0.92);
+    --muted: rgba(255,255,255,0.62);
+    --muted2: rgba(255,255,255,0.48);
 
-    --accent: #a855f7;
-    --accent2: #38bdf8;
+    --border: rgba(148,163,184,0.14);
+    --border-strong: rgba(148,163,184,0.22);
+
+    --panel: rgba(2,6,23,0.72);
+    --panel2: rgba(2,6,23,0.86);
+
+    --accent: rgba(168,85,247,1);
+    --accent2: rgba(129,140,248,1);
+
+    --radius-lg: 14px;
+    --radius-md: 12px;
+    --radius-sm: 10px;
+
+    --space-1: 6px;
+    --space-2: 10px;
+    --space-3: 14px;
+    --space-4: 18px;
+
+    --shadow: 0 16px 40px rgba(0,0,0,0.35);
 
     --focus-ring: 0 0 0 2px rgba(168,85,247,0.45), 0 0 0 4px rgba(56,189,248,0.18);
   }
 
-  * {
-    box-sizing: border-box;
-    font-family: var(--font-kr);
-  }
+  * { box-sizing: border-box; font-family: var(--font-kr); }
+  html, body { margin: 0; padding: 0; }
+  button, input, textarea { font-family: var(--font-kr); }
 
   /* ---------------------------
     Logo pulse
   --------------------------- */
   @keyframes dkmv-logo-pulse {
-    0% {
-      filter: hue-rotate(0deg) brightness(1);
-      transform: scale(1);
-    }
-    50% {
-      filter: hue-rotate(12deg) brightness(1.12);
-      transform: scale(1.03);
-    }
-    100% {
-      filter: hue-rotate(-8deg) brightness(0.98);
-      transform: scale(1);
-    }
+    0% { filter: hue-rotate(0deg) brightness(1); transform: scale(1); }
+    50% { filter: hue-rotate(12deg) brightness(1.12); transform: scale(1.03); }
+    100% { filter: hue-rotate(-8deg) brightness(0.98); transform: scale(1); }
   }
 
   /* ---------------------------
@@ -63,21 +66,25 @@ export const appStyleText = `
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
-
     min-height: 100vh;
+    gap: var(--space-3);
   }
 
   /* ---------------------------
-    Top app bar (sketch-like)
+    Top app bar
   --------------------------- */
   .dkmv-topbar {
-    height: 40px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 8px;
+
+    padding: 12px 14px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(2,6,23,0.68), rgba(2,6,23,0.52));
+    box-shadow: 0 10px 26px rgba(0,0,0,0.28);
   }
 
   .dkmv-brand {
@@ -88,7 +95,7 @@ export const appStyleText = `
   }
 
   .dkmv-brand-title {
-    font-weight: 800;
+    font-weight: 900;
     font-size: 13px;
     letter-spacing: 0.2px;
     white-space: nowrap;
@@ -104,7 +111,7 @@ export const appStyleText = `
   }
 
   /* ---------------------------
-    User badge (bigger avatar + nickname)
+    User badge
   --------------------------- */
   .dkmv-user-badge {
     display: inline-flex;
@@ -112,9 +119,11 @@ export const appStyleText = `
     gap: 10px;
 
     padding: 6px 10px;
-    border: none;
+    border-radius: 999px;
+    border: 1px solid var(--border);
     background: rgba(2,6,23,0.35);
     color: var(--text);
+    cursor: default;
   }
 
   .dkmv-user-badge[disabled] {
@@ -134,28 +143,23 @@ export const appStyleText = `
   }
 
   @media (max-width: 620px) {
-    .dkmv-user-name {
-      display: none;
-    }
+    .dkmv-user-name { display: none; }
   }
 
   /* ---------------------------
-    Row separators (tabs/status)
-  --------------------------- */
-  .dkmv-row {}
-
-  /* ---------------------------
-    Status bar (sketch middle bar)
-    ✅ grid -> flex (버튼 절대 안 사라지게)
+    Status bar
   --------------------------- */
   .dkmv-statusbar-like {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
 
-    padding: 10px 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(2,6,23,0.68), rgba(2,6,23,0.52));
+    box-shadow: 0 10px 26px rgba(0,0,0,0.28);
 
-    /* ✅ ellipsis가 먹히려면 필수 */
     min-width: 0;
     flex-wrap: nowrap;
   }
@@ -183,7 +187,6 @@ export const appStyleText = `
     opacity: 0.92;
   }
 
-  /* ✅ 메시지 ... 처리 */
   .dkmv-ellipsis {
     min-width: 0;
     flex: 1 1 auto;
@@ -192,7 +195,6 @@ export const appStyleText = `
     white-space: nowrap;
   }
 
-  /* ✅ 버튼 래퍼: 절대 줄어들지 않음 */
   .dkmv-status-actions {
     display: inline-flex;
     align-items: center;
@@ -213,31 +215,14 @@ export const appStyleText = `
     transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease, opacity 140ms ease;
     box-shadow: 0 12px 26px rgba(0,0,0,0.28);
     white-space: nowrap;
-
-    /* ✅ 여기 중요: 버튼이 flex에서 줄어들지 않게 */
     flex-shrink: 0;
   }
 
-  .dkmv-primary:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.05);
-  }
-  .dkmv-primary:active {
-    transform: translateY(0px);
-  }
-  .dkmv-primary:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring), 0 12px 26px rgba(0,0,0,0.28);
-  }
-  .dkmv-primary[disabled] {
-    opacity: 0.55;
-    cursor: not-allowed;
-    box-shadow: none;
-    transform: none;
-    animation: none;
-  }
+  .dkmv-primary:hover { transform: translateY(-1px); filter: brightness(1.05); }
+  .dkmv-primary:active { transform: translateY(0px); }
+  .dkmv-primary:focus-visible { outline: none; box-shadow: var(--focus-ring), 0 12px 26px rgba(0,0,0,0.28); }
+  .dkmv-primary[disabled] { opacity: 0.55; cursor: not-allowed; box-shadow: none; transform: none; animation: none; }
 
-  /* ✅ 준비되면(활성 상태) 살짝 빛나는 CTA */
   .dkmv-cta-ready {
     position: relative;
     box-shadow:
@@ -247,18 +232,7 @@ export const appStyleText = `
     animation: dkmv-cta-pulse 1.6s ease-in-out infinite;
   }
 
-  .dkmv-cta-ready:hover:not([disabled]) {
-    box-shadow:
-      0 0 0 1px rgba(196, 181, 253, 0.55),
-      0 0 26px rgba(168, 85, 247, 0.55),
-      0 12px 26px rgba(0,0,0,0.28);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .dkmv-cta-ready {
-      animation: none;
-    }
-  }
+  @media (prefers-reduced-motion: reduce) { .dkmv-cta-ready { animation: none; } }
 
   @keyframes dkmv-cta-pulse {
     0% {
@@ -281,12 +255,8 @@ export const appStyleText = `
     }
   }
 
-  /* ✅ 기존에 있던 "모바일에서 버튼 숨김" 제거!
-     - width 줄어도 버튼은 없어지면 안된다고 했으니까.
-     - 대신 메시지만 ... 처리됨. */
-
   /* ---------------------------
-    TopTabs: 4-split full width square buttons
+    TopTabs: 4-split full width buttons
   --------------------------- */
   .dkmv-tabs-grid {
     width: 100%;
@@ -295,7 +265,7 @@ export const appStyleText = `
     gap: 0;
     border-radius: 12px;
     overflow: hidden;
-    border: 1px solid rgba(148,163,184,0.22);
+    border: 1px solid var(--border-strong);
     background: rgba(2,6,23,0.25);
   }
 
@@ -317,243 +287,181 @@ export const appStyleText = `
     cursor: pointer;
     user-select: none;
 
-    transition:
-      background 160ms ease,
-      transform 160ms ease,
-      box-shadow 160ms ease,
-      filter 160ms ease,
-      opacity 160ms ease;
+    transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease, filter 160ms ease, opacity 160ms ease;
     position: relative;
   }
 
-  /* vertical separators inside grid */
-  .dkmv-tab-square:not(:last-child) {
-    box-shadow: inset -1px 0 0 rgba(148,163,184,0.16);
-  }
-
-  .dkmv-tab-square:hover {
-    background: rgba(15,23,42,0.62);
-    filter: brightness(1.05);
-    transform: translateY(-0.5px);
-  }
-
-  .dkmv-tab-square:active {
-    transform: translateY(0);
-  }
-
-  .dkmv-tab-square:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-    z-index: 2;
-  }
+  .dkmv-tab-square:not(:last-child) { box-shadow: inset -1px 0 0 rgba(148,163,184,0.16); }
+  .dkmv-tab-square:hover { background: rgba(15,23,42,0.62); filter: brightness(1.05); transform: translateY(-0.5px); }
+  .dkmv-tab-square:active { transform: translateY(0); }
+  .dkmv-tab-square:focus-visible { outline: none; box-shadow: var(--focus-ring); z-index: 2; }
 
   .dkmv-tab-square[data-active="true"] {
-    background: linear-gradient(
-      135deg,
-      rgba(126,34,206,0.85),
-      rgba(168,85,247,0.30)
-    );
+    background: linear-gradient(135deg, rgba(126,34,206,0.85), rgba(168,85,247,0.30));
   }
 
-  .dkmv-tab-square[disabled] {
-    opacity: 0.55;
-    cursor: not-allowed;
-    transform: none;
-    filter: none;
-  }
+  .dkmv-tab-square[disabled] { opacity: 0.55; cursor: not-allowed; transform: none; filter: none; }
 
-  .dkmv-tab-label {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  @media (max-width: 620px) {
-    .dkmv-tab-square { gap: 0; }
-    .dkmv-tab-label { display: none; }
-  }
+  .dkmv-tab-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 620px) { .dkmv-tab-square { gap: 0; } .dkmv-tab-label { display: none; } }
 
   /* ---------------------------
-    Existing: link/token button hover effect
+    Link/token button hover effect
   --------------------------- */
-  .dkmv-link-btn,
-  .dkmv-token-btn {
+  .dkmv-link-btn, .dkmv-token-btn {
     position: relative;
     overflow: hidden;
-    transition:
-      transform 0.16s ease-out,
-      box-shadow 0.16s ease-out,
-      background 0.16s ease-out,
-      opacity 0.16s ease-out,
-      border-color 0.16s ease-out;
+    transition: transform 0.16s ease-out, box-shadow 0.16s ease-out, background 0.16s ease-out, opacity 0.16s ease-out, border-color 0.16s ease-out;
   }
-  .dkmv-link-btn::before,
-  .dkmv-token-btn::before {
+  .dkmv-link-btn::before, .dkmv-token-btn::before {
     content: "";
     position: absolute;
     inset: 0;
     opacity: 0;
-    background: radial-gradient(
-      circle at 0% 0%,
-      rgba(248,250,252,0.12),
-      transparent 60%
-    );
+    background: radial-gradient(circle at 0% 0%, rgba(248,250,252,0.12), transparent 60%);
     transition: opacity 0.22s ease-out;
   }
-  .dkmv-link-btn:hover::before,
-  .dkmv-token-btn:hover::before {
-    opacity: 1;
-  }
-  .dkmv-link-btn:hover,
-  .dkmv-token-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(15,23,42,0.75);
-  }
-  .dkmv-link-btn:active,
-  .dkmv-token-btn:active {
-    transform: translateY(0);
-    box-shadow: 0 3px 10px rgba(15,23,42,0.9);
-  }
+  .dkmv-link-btn:hover::before, .dkmv-token-btn:hover::before { opacity: 1; }
+  .dkmv-link-btn:hover, .dkmv-token-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15,23,42,0.75); }
+  .dkmv-link-btn:active, .dkmv-token-btn:active { transform: translateY(0); box-shadow: 0 3px 10px rgba(15,23,42,0.9); }
 
   /* ---------------------------
-    Existing: token tab layout
+    Token surface (v2) - 통일 버전
   --------------------------- */
-  .dkmv-token-root {
+  .dkmv-token-root{
     width: 100%;
     height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 16px 10px 18px;
-    box-sizing: border-box;
   }
 
-  .dkmv-token-card {
-    width: 100%;
-    max-width: 640px;
-    border-radius: 16px;
-    border: 1px solid rgba(31,41,55,0.95);
-    background: radial-gradient(circle at 0% 0%, #020617, #020617);
-    padding: 18px 20px 20px;
-    box-shadow:
-      0 18px 40px rgba(15,23,42,0.9),
-      0 0 0 1px rgba(15,23,42,0.85);
+  .dkmv-token-card2{
+    width: min(520px, 100%);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(2,6,23,0.72), rgba(2,6,23,0.52));
+    box-shadow: var(--shadow);
+    overflow: hidden;
   }
 
-  .dkmv-token-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #e5e7eb;
-    text-align: center;
-    letter-spacing: 0.03em;
-  }
-
-  .dkmv-token-sub {
-    margin-top: 8px;
-    font-size: 11px;
-    line-height: 1.7;
-    color: #9ca3af;
-    text-align: center;
-  }
-
-  .dkmv-token-actions {
-    margin-top: 14px;
+  .dkmv-token-head{
+    padding: 14px 14px 12px 14px;
+    border-bottom: 1px solid var(--border);
     display: flex;
-    justify-content: center;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
   }
 
-  .dkmv-token-input-wrap {
-    margin-top: 14px;
+  .dkmv-token-title{
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: -0.2px;
+    color: var(--text);
+    margin: 0;
+  }
+
+  .dkmv-token-desc{
+    margin: 6px 0 0 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  .dkmv-token-body{
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-3);
+  }
+
+  .dkmv-field-row{
+    display: flex;
+    gap: var(--space-2);
     align-items: center;
   }
 
-  .dkmv-token-input-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    width: 100%;
-  }
-
-  .dkmv-token-input {
-    flex: 1 1 260px;
-    max-width: 420px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(55,65,81,0.95);
-    background-color: #020617;
-    color: #e5e7eb;
-    font-size: 11px;
-    font-family:
-      ui-monospace,
-      SFMono-Regular,
-      Menlo,
-      Monaco,
-      Consolas,
-      "Liberation Mono",
-      "Courier New",
-      monospace;
+  .dkmv-input{
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-strong);
+    background: rgba(2,6,23,0.62);
+    color: var(--text);
     outline: none;
-    box-sizing: border-box;
-    transition:
-      border-color 0.15s ease-out,
-      box-shadow 0.15s ease-out,
-      background 0.15s ease-out;
   }
 
-  .dkmv-token-input:focus {
+  .dkmv-input::placeholder{ color: rgba(255,255,255,0.40); }
+
+  .dkmv-input:focus{
     border-color: rgba(129,140,248,1);
     box-shadow: 0 0 0 1px rgba(129,140,248,0.85);
-    background: #020617;
   }
 
-  .dkmv-token-error {
-    font-size: 10px;
-    color: #fecaca;
-    text-align: center;
-  }
-
-  .dkmv-token-foot {
-    margin-top: 8px;
-    display: flex;
-    justify-content: center;
+  .dkmv-helper{
+    font-size: 11px;
+    color: var(--muted2);
+    line-height: 1.45;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 10px;
-    color: #6b7280;
   }
 
-  .dkmv-token-authed {
-    margin-bottom: 14px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .dkmv-token-authed-main {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .dkmv-token-authed-text {
+  .dkmv-error{
     font-size: 12px;
-    color: #c7d2fe;
+    color: #fca5a5;
+    line-height: 1.35;
   }
 
-  .dkmv-token-authed-sub {
+  /* ---------------------------
+    Token surface (v1) 호환 매핑 (기존 컴포넌트가 쓰면 무조건 v2 느낌으로)
+  --------------------------- */
+  .dkmv-token-card{
+    width: min(520px, 100%);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(2,6,23,0.72), rgba(2,6,23,0.52));
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    padding: 0;
+  }
+  .dkmv-token-sub{
+    margin: 6px 0 0 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.45;
+    text-align: left;
+  }
+  .dkmv-token-actions, .dkmv-token-input-wrap, .dkmv-token-input-row{
+    margin: 0;
+    padding: 0;
+    display: block;
+  }
+  .dkmv-token-input{
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-strong);
+    background: rgba(2,6,23,0.62);
+    color: var(--text);
+    outline: none;
+    box-sizing: border-box;
+  }
+  .dkmv-token-input::placeholder{ color: rgba(255,255,255,0.40); }
+
+  .dkmv-token-error{
+    font-size: 12px;
+    color: #fca5a5;
+    text-align: left;
+  }
+
+  .dkmv-token-foot{
     font-size: 11px;
-    color: #9ca3af;
-    text-align: center;
-  }
-
-  @media (max-width: 640px) {
-    .dkmv-token-card {
-      padding: 16px 14px 18px;
-    }
+    color: var(--muted2);
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
   }
 `;

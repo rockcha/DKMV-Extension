@@ -1,7 +1,7 @@
 // src/webview/components/ModelSelector.tsx
 import React, { useMemo, useState } from "react";
 import { MODEL_OPTIONS } from "../modelOptions";
-import { Bot, Search } from "lucide-react";
+import { Search } from "lucide-react";
 
 declare global {
   interface Window {
@@ -61,22 +61,6 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
           minWidth: 0,
         }}
       >
-        <span
-          style={{
-            fontSize: 11,
-            color: hasError ? "#fecaca" : "#e5e7eb",
-            opacity: 0.95,
-            whiteSpace: "nowrap",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            flexShrink: 0,
-          }}
-        >
-          <Bot size={13} />
-          <span>내가 사용한 AI Agent</span>
-        </span>
-
         <div
           style={{
             display: "flex",
@@ -132,9 +116,9 @@ const ModelSelector: React.FC<Props> = ({ value, onChange, hasError }) => {
         style={{
           borderRadius: 10,
           border: borderColor,
-          backgroundColor: "rgba(15,23,42,0.98)",
+          backgroundColor: "transparent",
           maxHeight: 180,
-          minHeight: 120,
+          minHeight: 180,
           overflowY: "auto",
           padding: 4,
           width: "100%",
